@@ -1,37 +1,124 @@
-import { useState, useRef, useEffect } from 'react';
-import { Gamepad2, Plus, List, BarChart2, Trophy, ChevronLeft, Check, Trash2, ShieldAlert, Users, X, Flag, Edit } from 'lucide-react';
+import { useState, useRef, useEffect, useMemo } from 'react';
+import { Gamepad2, Plus, List, BarChart2, Trophy, ChevronLeft, Check, Trash2, ShieldAlert, Users, X, Flag, Edit, Lock, Unlock, Search, CalendarPlus, Shield, UserCheck, ShieldClose, UserX, MessageSquare, AlertOctagon, PieChart, BarChart } from 'lucide-react';
 import { db } from './firebase'; 
-import { collection, doc, setDoc, deleteDoc, onSnapshot, query, orderBy } from 'firebase/firestore'; 
+import { collection, doc, setDoc, getDoc, updateDoc, deleteDoc, onSnapshot, query, orderBy } from 'firebase/firestore'; 
 
 const yakuData = {
-  '1판 역': ['리치', '일발', '멘젠쯔모', '탕야오', '핑후', '이페코', '백', '발', '중', '자풍패', '장풍패', '해저로월', '하저로어', '영상개화', '창깡'],
-  '2판 역': ['더블리치', '치또이쯔', '일기통관', '삼색동순', '삼색동각', '또이또이', '산안커', '찬타', '소삼원', '혼노두', '산깡쯔'],
+  '1판 역': ['리치', '일발', '멘젠쯔모', '탕야오', '핑후', '이페코', '해저로월', '하저로어', '영상개화', '창깡', '백', '발', '중', '자풍패', '장풍패'],
+  '2판 역': ['더블리치', '찬타', '삼색동순', '일기통관', '대대화', '삼암각', '삼색동각', '산깡즈', '소삼원', '혼로두'],
   '3판 역': ['혼일색', '준찬타', '량페코'],
   '6판 역': ['청일색'],
-  '역만': ['천화', '지화', '인화', '스안커', '국사무쌍', '대삼원', '구련보등', '소사희', '자일색', '녹일색', '청노두', '스깡쯔', '대차륜', '대죽림', '대수린', '석상삼년'],
-  '더블역만': ['대사희', '스안커 단기', '국사무쌍 13면 대기', '순정구련보등', '홍공작', '대칠성']
+  '역만': ['국사무쌍', '사암각', '대삼원', '자일색', '녹일색', '청노두', '구련보등', '사깡즈', '소사희', '대사희', '천화', '지화']
 };
-
 const targetFuroYaku = ['일기통관', '삼색동순', '찬타', '준찬타', '혼일색'];
 const abortiveDraws = ['구종구패', '사풍연타', '사깡유국', '사가리치'];
+const chomboTypes = ['만관 지불', '무효국 (벌점 없음)', '기타 (코멘트 참조)'];
+const ADMIN_PIN = '0000';
 
 function App() {
   const [activeTab, setActiveTab] = useState('4인');
   const [activeNav, setActiveNav] = useState('기록');
   
-  // --- 🌟 Firebase 실시간 컬렉션 연동 ---
   const [games, setGames] = useState([]); 
+  const [seasons, setSeasons] = useState([{ id: 'season_1', name: '시즌 1' }]); 
   const [isLoading, setIsLoading] = useState(true);
 
+  const [currentUser, setCurrentUser] = useState(() => {
+    const saved = localStorage.getItem('mahjong_user');
+    return saved ? JSON.parse(saved) : null;
+  });
+  
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [authMode, setAuthMode] = useState('login'); 
+  const [authName, setAuthName] = useState(''); const [authPin, setAuthPin] = useState(''); const [authRoleReq, setAuthRoleReq] = useState('player'); 
+  const [isMasterModalOpen, setIsMasterModalOpen] = useState(false);
+  const [allUsers, setAllUsers] = useState([]);
+
+  const canWrite = !!currentUser; 
+  const isAdmin = currentUser?.role === 'admin' || currentUser?.role === 'master';
+  const isMaster = currentUser?.role === 'master';
+
   useEffect(() => {
-    // 'games' 컬렉션의 문서들을 시간순으로 가져옵니다.
-    const q = query(collection(db, 'games'), orderBy('id', 'desc'));
-    const unsub = onSnapshot(q, (snapshot) => {
-      setGames(snapshot.docs.map(doc => doc.data()));
-      setIsLoading(false);
+    const qGames = query(collection(db, 'games'), orderBy('id', 'desc'));
+    const unsubGames = onSnapshot(qGames, (snapshot) => { setGames(snapshot.docs.map(doc => doc.data())); setIsLoading(false); });
+    const unsubSeasons = onSnapshot(doc(db, 'settings', 'seasons'), (docSnap) => {
+      if (docSnap.exists() && docSnap.data().list) setSeasons(docSnap.data().list);
+      else setDoc(doc(db, 'settings', 'seasons'), { list: [{ id: 'season_1', name: '시즌 1' }] });
     });
-    return () => unsub();
+    return () => { unsubGames(); unsubSeasons(); };
   }, []);
+
+  useEffect(() => {
+    if (!currentUser) return;
+    const unsubUser = onSnapshot(doc(db, 'users', currentUser.name), (docSnap) => {
+      if (docSnap.exists()) {
+        const updatedUser = docSnap.data(); setCurrentUser(updatedUser); localStorage.setItem('mahjong_user', JSON.stringify(updatedUser));
+      } else {
+        setCurrentUser(null); localStorage.removeItem('mahjong_user'); alert('계정이 관리자에 의해 삭제되었습니다.');
+      }
+    });
+    return () => unsubUser();
+  }, [currentUser?.name]);
+
+  useEffect(() => {
+    if (!isMaster) return;
+    const unsubUsers = onSnapshot(collection(db, 'users'), (snapshot) => setAllUsers(snapshot.docs.map(d => d.data())));
+    return () => unsubUsers();
+  }, [isMaster]);
+
+  const handleSignup = async () => {
+    if (!authName.trim() || !/^\d{4}$/.test(authPin)) return alert('이름과 4자리 숫자 PIN을 정확히 입력해주세요.');
+    const userRef = doc(db, 'users', authName); const userSnap = await getDoc(userRef);
+    if (userSnap.exists()) return alert('이미 존재하는 이름입니다. 로그인해주세요.');
+    let initialRole = 'player'; let isPending = false;
+    if (authName === '마스터') { initialRole = 'master'; alert('최고 관리자(마스터) 계정이 생성되었습니다!'); } 
+    else if (authRoleReq === 'admin') { isPending = true; alert('관리자 권한을 요청했습니다. 승인 전까지 [작사] 권한으로 활동합니다.'); } 
+    else alert('회원가입이 완료되었습니다.');
+    const newUser = { name: authName, pin: authPin, role: initialRole, pendingAdmin: isPending };
+    await setDoc(userRef, newUser);
+    setCurrentUser(newUser); localStorage.setItem('mahjong_user', JSON.stringify(newUser));
+    setIsAuthModalOpen(false); setAuthName(''); setAuthPin('');
+  };
+
+  const handleLogin = async () => {
+    if (!authName.trim() || !authPin) return alert('이름과 PIN을 입력해주세요.');
+    const userRef = doc(db, 'users', authName); const userSnap = await getDoc(userRef);
+    if (!userSnap.exists()) return alert('존재하지 않는 유저입니다. 회원가입을 진행해주세요.');
+    const userData = userSnap.data();
+    if (userData.pin !== authPin) return alert('PIN 번호가 일치하지 않습니다.');
+    setCurrentUser(userData); localStorage.setItem('mahjong_user', JSON.stringify(userData));
+    setIsAuthModalOpen(false); setAuthName(''); setAuthPin('');
+  };
+
+  const handleLogout = () => { setCurrentUser(null); localStorage.removeItem('mahjong_user'); };
+  const handleApproveAdmin = async (name) => { await updateDoc(doc(db, 'users', name), { role: 'admin', pendingAdmin: false }); };
+  const handleRejectAdmin = async (name) => { await updateDoc(doc(db, 'users', name), { pendingAdmin: false }); };
+  const handlePromoteAdmin = async (name) => { await updateDoc(doc(db, 'users', name), { role: 'admin' }); };
+  const handleDemotePlayer = async (name) => { await updateDoc(doc(db, 'users', name), { role: 'player' }); };
+  const handleRemoveUser = async (name) => { if(confirm(`${name} 유저를 완전히 삭제하시겠습니까?`)) await deleteDoc(doc(db, 'users', name)); };
+
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedSeason, setSelectedSeason] = useState('all'); 
+  const [isSeasonModalOpen, setIsSeasonModalOpen] = useState(false);
+  const [newSeasonName, setNewSeasonName] = useState('');
+
+  const handleAddSeason = async () => {
+    if (!newSeasonName) return;
+    const newSeasonList = [...seasons, { id: `season_${Date.now()}`, name: newSeasonName }];
+    await setDoc(doc(db, 'settings', 'seasons'), { list: newSeasonList });
+    setNewSeasonName(''); setIsSeasonModalOpen(false);
+  };
+
+  const displayedGames = games.filter(g => {
+    if (g.type !== activeTab) return false;
+    if (selectedSeason !== 'all' && g.seasonId !== selectedSeason) return false;
+    if (searchQuery) {
+      const matchDate = g.date.includes(searchQuery);
+      const matchPlayer = g.players.some(p => p.includes(searchQuery));
+      if (!matchDate && !matchPlayer) return false;
+    }
+    return true;
+  });
 
   const [selectedGameId, setSelectedGameId] = useState(null); 
   const [isNewGameModalOpen, setIsNewGameModalOpen] = useState(false);
@@ -47,47 +134,58 @@ function App() {
   const [fu, setFu] = useState(30); const [han, setHan] = useState(1); const [score, setScore] = useState('');
   const [selectedYaku, setSelectedYaku] = useState([]); const [furoDecreased, setFuroDecreased] = useState([]); 
   const [tenpaiPlayers, setTenpaiPlayers] = useState([]); const [nagashiMangan, setNagashiMangan] = useState([]); const [abortiveType, setAbortiveType] = useState(null); 
+  const [roundComment, setRoundComment] = useState(''); const [chomboPlayer, setChomboPlayer] = useState(null); const [chomboType, setChomboType] = useState('만관 지불');
 
   const currentGame = games.find(g => g.id === selectedGameId);
   const records = currentGame ? currentGame.rounds : [];
   const players = currentGame ? currentGame.players : [];
-  const displayedGames = games.filter(g => g.type === activeTab);
 
-  // 현재 대국 요약 정보
   const totalRecords = records.length;
   const winRecords = records.filter(r => r.type === '화료');
   const tsumoCount = winRecords.filter(r => r.winType === '쯔모').length;
   const ronCount = winRecords.filter(r => r.winType === '론').length;
   const avgHan = winRecords.length > 0 ? (winRecords.reduce((acc, r) => acc + r.han, 0) / winRecords.length).toFixed(1) : 0;
 
-  // --- 이벤트 핸들러 ---
+  useEffect(() => {
+    if (recordMode !== '화료') return;
+    let calcHan = 0;
+    selectedYaku.forEach(y => {
+      if (yakuData['1판 역'].includes(y)) calcHan += 1;
+      else if (yakuData['2판 역'].includes(y)) calcHan += 2;
+      else if (yakuData['3판 역'].includes(y)) calcHan += 3;
+      else if (yakuData['6판 역'].includes(y)) calcHan += 6;
+      else if (yakuData['역만'].includes(y)) calcHan += 13; 
+    });
+    calcHan -= furoDecreased.length;
+    calcHan += dora + aka + ura;
+    if (activeTab === '3인') calcHan += pei;
+    setHan(calcHan > 0 ? calcHan : 1);
+  }, [selectedYaku, furoDecreased, dora, aka, ura, pei, activeTab, recordMode]);
+
   const playerTimerRef = useRef(null);
   const handlePlayerTouchStart = (index) => { playerTimerRef.current = setTimeout(() => { if (winType === '론') { setLoser(index); if (winner === index) setWinner(null); } }, 500); };
   const handlePlayerTouchEnd = () => { if (playerTimerRef.current) clearTimeout(playerTimerRef.current); };
   const handlePlayerDoubleClick = (index) => { if (winType === '론') { setLoser(index); if (winner === index) setWinner(null); } };
   const handlePlayerClick = (index) => { setWinner(index); if (loser === index) setLoser(null); };
   const handleWinTypeChange = (type) => { setWinType(type); if (type === '쯔모') setLoser(null); };
-
   const yakuTimerRef = useRef(null);
   const toggleYaku = (yaku) => setSelectedYaku(prev => prev.includes(yaku) ? prev.filter(y => y !== yaku) : [...prev, yaku]);
   const toggleFuroDecrease = (yaku) => { setFuroDecreased(prev => prev.includes(yaku) ? prev.filter(y => y !== yaku) : [...prev, yaku]); setSelectedYaku(prev => prev.includes(yaku) ? prev : [...prev, yaku]); };
   const handleYakuTouchStart = (yaku) => { if (!targetFuroYaku.includes(yaku)) return; yakuTimerRef.current = setTimeout(() => toggleFuroDecrease(yaku), 500); };
   const handleYakuTouchEnd = () => { if (yakuTimerRef.current) clearTimeout(yakuTimerRef.current); };
   const handleYakuDoubleClick = (yaku) => { if (!targetFuroYaku.includes(yaku)) return; toggleFuroDecrease(yaku); };
-
   const toggleTenpai = (index) => { setTenpaiPlayers(prev => prev.includes(index) ? prev.filter(i => i !== index) : [...prev, index]); setAbortiveType(null); };
   const toggleNagashi = (index) => setNagashiMangan(prev => prev.includes(index) ? prev.filter(i => i !== index) : [...prev, index]);
   const toggleAbortive = (type) => { setAbortiveType(prev => prev === type ? null : type); if (abortiveType !== type) setTenpaiPlayers([]); };
 
-  // --- 💾 DB 액션 ---
   const handleCreateNewGame = async () => {
     if (activeTab === '4인' && (!playerE || !playerS || !playerW || !playerN)) return alert("모든 플레이어 이름을 입력해주세요!");
     if (activeTab === '3인' && (!playerE || !playerS || !playerW)) return alert("모든 플레이어 이름을 입력해주세요!");
+    const currentSeasonId = selectedSeason === 'all' ? seasons[seasons.length - 1].id : selectedSeason;
     const newGame = { 
-      id: Date.now(), 
+      id: Date.now(), seasonId: currentSeasonId,
       date: new Date().toLocaleDateString('ko-KR', { year: 'numeric', month: '2-digit', day: '2-digit' }).replace(/\./g, '.').slice(0, -1), 
-      type: activeTab, 
-      players: activeTab === '4인' ? [playerE, playerS, playerW, playerN] : [playerE, playerS, playerW], 
+      type: activeTab, players: activeTab === '4인' ? [playerE, playerS, playerW, playerN] : [playerE, playerS, playerW], 
       rounds: [], status: '진행중', finalResults: null 
     };
     await setDoc(doc(db, 'games', newGame.id.toString()), newGame);
@@ -96,36 +194,35 @@ function App() {
   };
 
   const handleSaveRound = async () => {
-    let newRound = { id: Date.now(), wind, roundNum, honba, kyotaku, type: recordMode };
+    let newRound = { id: Date.now(), wind, roundNum, honba, kyotaku, type: recordMode, comment: roundComment };
     if (recordMode === '화료') {
       if (winner === null) return alert("화료자를 선택해주세요!");
       if (winType === '론' && loser === null) return alert("방총자를 선택해주세요!");
       newRound = { ...newRound, winType, menzen, waitType, winner: players[winner], loser: loser !== null ? players[loser] : null, selectedYaku, furoDecreased, dora, aka, ura, pei, fu, han, score };
-    } else {
+    } else if (recordMode === '유국') {
       newRound = { ...newRound, tenpaiPlayers: tenpaiPlayers.map(i => players[i]), nagashiMangan: nagashiMangan.map(i => players[i]), abortiveType };
+    } else if (recordMode === '촌보') {
+      if (chomboPlayer === null) return alert("촌보 발생자를 선택해주세요!");
+      newRound = { ...newRound, chomboPlayer: players[chomboPlayer], chomboType };
     }
     const updatedGame = { ...currentGame, rounds: [newRound, ...currentGame.rounds] };
     await setDoc(doc(db, 'games', selectedGameId.toString()), updatedGame);
-    setIsRoundModalOpen(false); setWinner(null); setLoser(null); setSelectedYaku([]); setFuroDecreased([]); setDora(0); setAka(0); setUra(0); setPei(0); setTenpaiPlayers([]); setNagashiMangan([]); setAbortiveType(null);
+    setIsRoundModalOpen(false); setWinner(null); setLoser(null); setSelectedYaku([]); setFuroDecreased([]); setDora(0); setAka(0); setUra(0); setPei(0); setTenpaiPlayers([]); setNagashiMangan([]); setAbortiveType(null); setRoundComment(''); setScore(''); setChomboPlayer(null); setChomboType('만관 지불');
   };
 
-  const handleDeleteRound = async (roundId) => { 
-    if(confirm("이 국의 기록을 삭제하시겠습니까?")) await setDoc(doc(db, 'games', selectedGameId.toString()), { ...currentGame, rounds: currentGame.rounds.filter(r => r.id !== roundId) });
-  };
-  const handleDeleteGame = async (e, gameId) => { 
-    e.stopPropagation(); 
-    if(confirm("이 대국의 전체 기록을 삭제하시겠습니까?")) { await deleteDoc(doc(db, 'games', gameId.toString())); if(selectedGameId === gameId) setSelectedGameId(null); } 
-  };
+  const handleDeleteRound = async (roundId) => { if(confirm("이 국의 기록을 삭제하시겠습니까?")) await setDoc(doc(db, 'games', selectedGameId.toString()), { ...currentGame, rounds: currentGame.rounds.filter(r => r.id !== roundId) }); };
+  const handleDeleteGame = async (e, gameId) => { e.stopPropagation(); if(confirm("이 대국의 전체 기록을 삭제하시겠습니까? 복구할 수 없습니다.")) { await deleteDoc(doc(db, 'games', gameId.toString())); if(selectedGameId === gameId) setSelectedGameId(null); } };
 
   const handleOpenEndGame = () => {
-    if (currentGame.finalResults) setFinalScores(currentGame.finalResults.map(f => ({ score: f.score })));
+    if (currentGame.finalResults) setFinalScores(currentGame.finalResults.map(f => ({ score: String(f.score) })));
     else setFinalScores(players.map(() => ({ score: '' })));
     setIsEndGameModalOpen(true);
   };
+  const updateFinalScore = (index, value) => { setFinalScores(prev => prev.map((item, i) => i === index ? { ...item, score: value } : item)); };
 
   const handleConfirmEndGame = async () => {
     if (finalScores.some(f => f.score === '')) return alert("모든 플레이어의 소점을 입력해주세요!");
-    const totalScore = finalScores.reduce((sum, f) => sum + parseInt(f.score), 0);
+    const totalScore = finalScores.reduce((sum, f) => sum + (parseInt(f.score) || 0), 0);
     const expectedTotal = players.length === 4 ? 100000 : 105000;
     if (totalScore !== expectedTotal) return alert(`총합이 맞지 않습니다!\n(필요: ${expectedTotal}점 / 현재: ${totalScore}점)`);
 
@@ -144,107 +241,256 @@ function App() {
     setIsEndGameModalOpen(false);
   };
 
-  // --- 🏆 랭킹 데이터 계산 로직 ---
-  const getRankingData = () => {
+  const hasYakuman = (game) => {
+    if(!game.rounds) return false;
+    return game.rounds.some(r => r.type === '화료' && (r.han >= 13 || r.selectedYaku?.some(y => yakuData['역만'].includes(y))));
+  };
+
+
+  // ==========================================
+  // 📊 통계 및 랭킹 데이터 처리 로직
+  // ==========================================
+  const [statsMainTab, setStatsMainTab] = useState('전체'); 
+  const [statsSubTab, setStatsSubTab] = useState('플레이어'); 
+  const [rankingMainTab, setRankingMainTab] = useState('전체'); 
+  const [rankingSort, setRankingSort] = useState('totalUma');
+  const [selectedStatPlayerName, setSelectedStatPlayerName] = useState(null); 
+  
+  // 💡 세부 분포 모달을 위한 상태 추가
+  const [breakdownData, setBreakdownData] = useState(null); 
+
+  // 💡 모달 데이터 생성 헬퍼 함수
+  const openBreakdown = (title, type, key) => {
+    const data = playerStatsList.map(p => {
+      let count = 0;
+      if (type === 'yaku') count = p.yakus[key] || 0;
+      else if (type === 'wait') count = p.waitTypes[key] || 0;
+      else if (type === 'winType') count = p[key] || 0;
+      return { name: p.name, count };
+    }).filter(p => p.count > 0).sort((a, b) => b.count - a.count);
+    setBreakdownData({ title, data });
+  };
+
+  const getFilteredGamesForStats = (typeTab) => {
+    return games.filter(g => {
+      if (g.status !== '종료') return false;
+      if (typeTab !== '전체' && g.type !== typeTab) return false;
+      if (selectedSeason !== 'all' && g.seasonId !== selectedSeason) return false;
+      return true;
+    });
+  };
+
+  const generatePlayerStats = (targetGames) => {
     const stats = {};
-    games.filter(g => g.type === activeTab && g.status === '종료').forEach(game => {
+    targetGames.forEach(game => {
       const sorted = game.finalResults.map((r, i) => ({ ...r, player: game.players[i] })).sort((a, b) => b.score - a.score);
       sorted.forEach((res, rank) => {
         const p = res.player;
-        if (!stats[p]) stats[p] = { name: p, playCount: 0, totalPt: 0, ranks: [0, 0, 0, 0], tobi: 0 };
-        stats[p].playCount += 1;
-        stats[p].totalPt += res.pt;
-        stats[p].ranks[rank] += 1;
-        if (res.score < 0) stats[p].tobi += 1;
-      });
-    });
-    return Object.values(stats).sort((a, b) => b.totalPt - a.totalPt);
-  };
-
-  // --- 📈 개인 통계 데이터 계산 로직 ---
-  const getPersonalStats = () => {
-    const stats = {};
-    const validGames = games.filter(g => g.type === activeTab && g.status === '종료');
-    
-    validGames.forEach(game => {
-      // 대국에 참여한 모든 플레이어 초기화
-      game.players.forEach(p => {
-        if (!stats[p]) stats[p] = { name: p, roundsPlayed: 0, winCount: 0, dealInCount: 0, furoWinCount: 0, totalHan: 0, yakus: {}, waitTypes: {} };
+        if (!stats[p]) {
+          stats[p] = { 
+            name: p, gamesPlayed: 0, totalUma: 0, totalScore: 0, maxScore: -99999, minScore: 99999,
+            ranks: [0,0,0,0], tobiCount: 0, roundsPlayed: 0, winCount: 0, dealInCount: 0, 
+            tsumoCount: 0, ronCount: 0, riichiWinCount: 0, damaWinCount: 0, furoWinCount: 0,
+            totalHan: 0, maxHonba: 0, waitTypes: {}, yakus: {},
+            totalWinScore: 0, winScoreCount: 0, // 💡 평균 타점 계산용
+            totalDealInScore: 0, dealInScoreCount: 0, // 💡 평균 방총점 계산용
+            chomboCount: 0, yakumanCount: 0,
+            menzenTsumo: 0, menzenRon: 0, furoTsumo: 0, furoRon: 0
+          };
+        }
+        stats[p].gamesPlayed += 1; stats[p].totalUma += res.pt; stats[p].totalScore += res.score; stats[p].ranks[rank] += 1;
+        if (res.score > stats[p].maxScore) stats[p].maxScore = res.score;
+        if (res.score < stats[p].minScore) stats[p].minScore = res.score;
+        if (res.score < 0) stats[p].tobiCount += 1;
       });
 
       game.rounds.forEach(round => {
+        game.players.forEach(p => { if (stats[p]) stats[p].roundsPlayed += 1; });
         if(round.type === '화료') {
-          // 해당 국에 참여한 4명(또는 3명)의 총 국수 증가
-          game.players.forEach(p => stats[p].roundsPlayed += 1);
-
-          // 화료자 통계
           const winnerStat = stats[round.winner];
-          winnerStat.winCount += 1;
-          winnerStat.totalHan += round.han;
-          if(round.menzen === '비멘젠') winnerStat.furoWinCount += 1;
-          
-          // 대기 형태 누적
-          winnerStat.waitTypes[round.waitType] = (winnerStat.waitTypes[round.waitType] || 0) + 1;
-          
-          // 역 누적
-          round.selectedYaku.forEach(yaku => {
-            winnerStat.yakus[yaku] = (winnerStat.yakus[yaku] || 0) + 1;
-          });
+          if(winnerStat) {
+            winnerStat.winCount += 1; winnerStat.totalHan += round.han;
+            if (round.honba > winnerStat.maxHonba) winnerStat.maxHonba = round.honba;
+            
+            const isMenzen = round.menzen === '멘젠';
+            if (round.winType === '쯔모') { winnerStat.tsumoCount += 1; isMenzen ? winnerStat.menzenTsumo++ : winnerStat.furoTsumo++; }
+            if (round.winType === '론') { winnerStat.ronCount += 1; isMenzen ? winnerStat.menzenRon++ : winnerStat.furoRon++; }
+            
+            const isRiichi = round.selectedYaku?.includes('리치') || round.selectedYaku?.includes('더블리치');
+            if (!isMenzen) winnerStat.furoWinCount += 1;
+            else if (isRiichi) winnerStat.riichiWinCount += 1;
+            else winnerStat.damaWinCount += 1;
 
-          // 방총자 통계
-          if(round.winType === '론' && round.loser) {
-            stats[round.loser].dealInCount += 1;
+            if (round.han >= 13 || round.selectedYaku?.some(y => yakuData['역만'].includes(y))) winnerStat.yakumanCount += 1;
+
+            winnerStat.waitTypes[round.waitType] = (winnerStat.waitTypes[round.waitType] || 0) + 1;
+            round.selectedYaku?.forEach(yaku => { winnerStat.yakus[yaku] = (winnerStat.yakus[yaku] || 0) + 1; });
+            
+            // 💡 화료 점수가 입력된 경우에만 합산 (평균 타점용)
+            if (round.score && Number(round.score) > 0) {
+              winnerStat.totalWinScore += Number(round.score);
+              winnerStat.winScoreCount += 1;
+            }
           }
-        } else if (round.type === '유국') {
-          game.players.forEach(p => stats[p].roundsPlayed += 1);
+          if(round.winType === '론' && round.loser && stats[round.loser]) {
+            stats[round.loser].dealInCount += 1;
+            // 💡 방총 시, 화료 점수가 입력된 경우에만 합산 (평균 방총점용)
+            if (round.score && Number(round.score) > 0) {
+              stats[round.loser].totalDealInScore += Number(round.score);
+              stats[round.loser].dealInScoreCount += 1;
+            }
+          }
+        } else if (round.type === '촌보') {
+          if (round.chomboPlayer && stats[round.chomboPlayer]) stats[round.chomboPlayer].chomboCount += 1;
         }
       });
     });
 
-    // 계산된 통계를 배열로 변환
-    return Object.values(stats).map(s => ({
-      ...s,
-      winRate: s.roundsPlayed > 0 ? ((s.winCount / s.roundsPlayed) * 100).toFixed(1) : 0,
-      dealInRate: s.roundsPlayed > 0 ? ((s.dealInCount / s.roundsPlayed) * 100).toFixed(1) : 0,
-      furoRate: s.winCount > 0 ? ((s.furoWinCount / s.winCount) * 100).toFixed(1) : 0,
-      avgHan: s.winCount > 0 ? (s.totalHan / s.winCount).toFixed(1) : 0,
-      // 가장 많이 쓴 역 Top 3 추출
-      topYakus: Object.entries(s.yakus).sort((a,b) => b[1] - a[1]).slice(0, 3)
-    })).sort((a,b) => b.winRate - a.winRate); // 기본 정렬: 화료율 순
+    return Object.values(stats).map(s => {
+      const avgRank = s.gamesPlayed > 0 ? ((s.ranks[0]*1 + s.ranks[1]*2 + s.ranks[2]*3 + s.ranks[3]*4) / s.gamesPlayed).toFixed(2) : 0;
+      const rentaiCount = s.ranks[0] + s.ranks[1];
+      return {
+        ...s,
+        winRate: s.roundsPlayed > 0 ? ((s.winCount / s.roundsPlayed) * 100).toFixed(1) : 0,
+        dealInRate: s.roundsPlayed > 0 ? ((s.dealInCount / s.roundsPlayed) * 100).toFixed(1) : 0,
+        avgHan: s.winCount > 0 ? (s.totalHan / s.winCount).toFixed(1) : 0,
+        avgWinScore: s.winScoreCount > 0 ? Math.floor(s.totalWinScore / s.winScoreCount) : 0, // 💡 실제 평균 타점
+        avgUma: s.gamesPlayed > 0 ? (s.totalUma / s.gamesPlayed).toFixed(1) : 0,
+        avgScore: s.gamesPlayed > 0 ? Math.floor(s.totalScore / s.gamesPlayed) : 0,
+        avgDealInScore: s.dealInScoreCount > 0 ? Math.floor(s.totalDealInScore / s.dealInScoreCount) : 0, // 💡 0점 입력건 제외된 방총점firstRate: s.gamesPlayed > 0 ? ((s.ranks[0] / s.gamesPlayed) * 100).toFixed(1) : 0,
+        rentaiRate: s.gamesPlayed > 0 ? ((rentaiCount / s.gamesPlayed) * 100).toFixed(1) : 0,
+        tobiRate: s.gamesPlayed > 0 ? ((s.tobiCount / s.gamesPlayed) * 100).toFixed(1) : 0,
+        avgRank: avgRank,
+        topYakus: Object.entries(s.yakus).sort((a,b) => b[1] - a[1]).slice(0, 5)
+      };
+    });
   };
 
-  const rankingData = getRankingData();
-  const personalStats = getPersonalStats();
+  const statsGames = getFilteredGamesForStats(statsMainTab);
+  const playerStatsList = useMemo(() => generatePlayerStats(statsGames).sort((a,b) => b.winCount - a.winCount), [statsGames]);
+  const selectedStatPlayer = playerStatsList.find(p => p.name === selectedStatPlayerName);
+
+  const globalYakuStats = useMemo(() => {
+    const yCounts = {};
+    statsGames.forEach(g => g.rounds.forEach(r => { if(r.type === '화료') r.selectedYaku?.forEach(y => yCounts[y] = (yCounts[y] || 0) + 1); }));
+    return Object.entries(yCounts).sort((a,b) => b[1] - a[1]);
+  }, [statsGames]);
+
+  const globalWinStats = useMemo(() => {
+    const w = { menzenTsumo:0, menzenRon:0, furoTsumo:0, furoRon:0, riichi:0, dama:0, furoWin:0, wait: {}, winCount:0 };
+    statsGames.forEach(g => g.rounds.forEach(r => {
+      if(r.type === '화료') {
+        w.winCount++;
+        const isMenzen = r.menzen === '멘젠';
+        if (r.winType === '쯔모') isMenzen ? w.menzenTsumo++ : w.furoTsumo++;
+        if (r.winType === '론') isMenzen ? w.menzenRon++ : w.furoRon++;
+        
+        const isRiichi = r.selectedYaku?.includes('리치') || r.selectedYaku?.includes('더블리치');
+        if (!isMenzen) w.furoWin++;
+        else if (isRiichi) w.riichi++;
+        else w.dama++;
+
+        w.wait[r.waitType] = (w.wait[r.waitType] || 0) + 1;
+      }
+    }));
+    return w;
+  }, [statsGames]);
+
+  const rankingList = useMemo(() => {
+    const list = generatePlayerStats(getFilteredGamesForStats(rankingMainTab));
+    const sorted = list.sort((a, b) => {
+      let diff = 0;
+      if (rankingSort === 'totalUma') diff = b.totalUma - a.totalUma;
+      else if (rankingSort === 'avgUma') diff = b.avgUma - a.avgUma;
+      else if (rankingSort === 'maxScore') diff = b.maxScore - a.maxScore;
+      else if (rankingSort === 'minScore') diff = a.minScore - b.minScore; 
+      else if (rankingSort === 'gameCount') diff = b.gamesPlayed - a.gamesPlayed;
+      else if (rankingSort === 'firstRate') diff = parseFloat(b.firstRate) - parseFloat(a.firstRate);
+      else if (rankingSort === 'rentaiRate') diff = parseFloat(b.rentaiRate) - parseFloat(a.rentaiRate);
+      else if (rankingSort === 'tobiRate') diff = parseFloat(a.tobiRate) - parseFloat(b.tobiRate); 
+      if (diff === 0) return a.name.localeCompare(b.name);
+      return diff;
+    });
+
+    let currentRank = 1;
+    return sorted.map((player, index, arr) => {
+      if (index > 0) {
+        const prev = arr[index - 1];
+        let isTie = false;
+        if (rankingSort === 'totalUma') isTie = player.totalUma === prev.totalUma;
+        else if (rankingSort === 'avgUma') isTie = player.avgUma === prev.avgUma;
+        else if (rankingSort === 'maxScore') isTie = player.maxScore === prev.maxScore;
+        else if (rankingSort === 'minScore') isTie = player.minScore === prev.minScore;
+        else if (rankingSort === 'gameCount') isTie = player.gamesPlayed === prev.gamesPlayed;
+        else if (rankingSort === 'firstRate') isTie = player.firstRate === prev.firstRate;
+        else if (rankingSort === 'rentaiRate') isTie = player.rentaiRate === prev.rentaiRate;
+        else if (rankingSort === 'tobiRate') isTie = player.tobiRate === prev.tobiRate;
+        if (!isTie) currentRank = index + 1;
+      }
+      return { ...player, rank: currentRank };
+    });
+  }, [games, rankingMainTab, rankingSort, selectedSeason]);
+
 
   if (isLoading) return <div className="h-screen w-full flex items-center justify-center bg-[#F5F5DC] text-[#2E7D32] font-bold">서버 연결 중...</div>;
 
   return (
     <div className="flex flex-col h-screen bg-[#F5F5DC] font-sans relative overflow-hidden text-[#1A1A1A]">
-      <header className="bg-[#2E7D32] text-white p-5 pt-10 shadow-md z-20 flex items-center justify-between">
-        {activeNav === '기록' && selectedGameId !== null ? (
-          <>
-            <button onClick={() => setSelectedGameId(null)} className="p-1 hover:bg-green-700 rounded-full transition-colors"><ChevronLeft size={28} /></button>
-            <div className="text-center flex-1"><h1 className="text-xl font-bold">{currentGame.type} 대국 상세</h1><p className="text-[11px] text-green-100 mt-0.5">{players.join(' · ')}</p></div>
-            <div className="w-8"></div>
-          </>
-        ) : (
-          <h1 className="text-2xl font-bold tracking-tight w-full text-center">
-            {activeNav === '기록' && '대국 기록'}
-            {activeNav === '통계' && '개인 통계'}
-            {activeNav === '랭킹' && '전체 랭킹'}
-          </h1>
+      
+      {/* 🚀 상단 헤더 */}
+      <header className="bg-[#2E7D32] text-white p-4 pt-10 shadow-md z-20">
+        <div className="flex items-center justify-between mb-3">
+          {activeNav === '기록' && selectedGameId !== null ? (
+             <button onClick={() => setSelectedGameId(null)} className="p-1 hover:bg-green-700 rounded-full transition-colors"><ChevronLeft size={28} /></button>
+          ) : (
+             <h1 className="text-xl font-bold tracking-tight">
+               {activeNav === '기록' && '리치마작 기록'}
+               {activeNav === '통계' && '마작 통계'}
+               {activeNav === '랭킹' && '플레이어 랭킹'}
+             </h1>
+          )}
+          {selectedGameId === null && (
+            <div className="flex items-center gap-1.5">
+              {currentUser ? (
+                <>
+                  <span className="text-[10px] font-medium bg-green-800 px-2 py-1 rounded-lg">{currentUser.role === 'master' ? '👑' : currentUser.role === 'admin' ? '🛡️' : '♟️'} {currentUser.name}</span>
+                  {isAdmin && <button onClick={() => setIsSeasonModalOpen(true)} className="p-1.5 bg-green-800 rounded-lg hover:bg-green-900 transition-colors"><CalendarPlus size={16} /></button>}
+                  {isMaster && <button onClick={() => setIsMasterModalOpen(true)} className="p-1.5 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 transition-colors"><Users size={16} /></button>}
+                  <button onClick={handleLogout} className="p-1.5 bg-green-800 rounded-lg text-yellow-300 hover:bg-green-900 transition-colors"><Unlock size={16} /></button>
+                </>
+              ) : (
+                <button onClick={() => {setAuthMode('login'); setIsAuthModalOpen(true);}} className="p-1.5 bg-green-800 rounded-lg hover:bg-green-900 flex items-center gap-1 text-sm font-medium"><Lock size={14} /> <span className="text-[10px]">로그인/가입</span></button>
+              )}
+            </div>
+          )}
+        </div>
+        {selectedGameId === null && (
+          <div className="relative">
+            <select value={selectedSeason} onChange={(e) => setSelectedSeason(e.target.value)} className="w-full bg-green-800 text-white text-sm font-bold py-2 px-3 rounded-xl appearance-none border border-green-700 focus:outline-none">
+              <option value="all">전체 시즌</option>
+              {seasons.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+            </select>
+          </div>
         )}
       </header>
 
-      {/* 상단 탭 공통 UI */}
-      {(selectedGameId === null || activeNav !== '기록') && (
+      {activeNav === '기록' && selectedGameId === null && (
         <div className="flex bg-white border-b border-gray-200 shadow-sm z-10 sticky top-0">
           <button className={`flex-1 py-3 text-center font-bold flex justify-center items-center gap-2 border-b-2 ${activeTab === '4인' ? 'border-[#2E7D32] text-[#2E7D32]' : 'border-transparent text-gray-500'}`} onClick={() => setActiveTab('4인')}>
-            4인 게임 <span className={`text-xs px-2 py-0.5 rounded-full text-white ${activeTab === '4인' ? 'bg-[#2E7D32]' : 'bg-gray-300'}`}>{games.filter(g=>g.type==='4인').length}</span>
+            4인 게임 <span className={`text-[10px] px-2 py-0.5 rounded-full text-white ${activeTab === '4인' ? 'bg-[#2E7D32]' : 'bg-gray-300'}`}>{games.filter(g=>g.type==='4인').length}</span>
           </button>
           <button className={`flex-1 py-3 text-center font-bold flex justify-center items-center gap-2 border-b-2 ${activeTab === '3인' ? 'border-[#2E7D32] text-[#2E7D32]' : 'border-transparent text-gray-500'}`} onClick={() => setActiveTab('3인')}>
-            3인 게임 <span className={`text-xs px-2 py-0.5 rounded-full text-white ${activeTab === '3인' ? 'bg-[#2E7D32]' : 'bg-gray-300'}`}>{games.filter(g=>g.type==='3인').length}</span>
+            3인 게임 <span className={`text-[10px] px-2 py-0.5 rounded-full text-white ${activeTab === '3인' ? 'bg-[#2E7D32]' : 'bg-gray-300'}`}>{games.filter(g=>g.type==='3인').length}</span>
           </button>
+        </div>
+      )}
+
+      {activeNav === '기록' && selectedGameId === null && (
+        <div className="p-4 pb-0 bg-[#F5F5DC]">
+          <div className="relative">
+            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><Search size={16} className="text-gray-400" /></div>
+            <input type="text" placeholder="플레이어 이름 또는 날짜 검색..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full pl-10 pr-4 py-2.5 bg-white border border-gray-200 rounded-xl text-sm font-medium focus:outline-none focus:border-[#2E7D32] shadow-sm" />
+          </div>
         </div>
       )}
 
@@ -256,127 +502,93 @@ function App() {
         {activeNav === '기록' && selectedGameId === null && (
           <div className="flex-1 flex flex-col p-4 space-y-4">
             {displayedGames.length === 0 ? (
-              <div className="flex-1 flex flex-col items-center justify-center mt-20 text-gray-400">
-                <Gamepad2 size={80} strokeWidth={1} className="mb-4" />
-                <h2 className="text-lg font-bold mb-3">아직 대국 기록이 없습니다</h2>
-                <p className="text-sm">우측 하단 + 버튼으로 새 대국을 만드세요</p>
-              </div>
+              <div className="flex-1 flex flex-col items-center justify-center mt-20 text-gray-400 text-center"><Gamepad2 size={64} strokeWidth={1} className="mb-4 text-gray-300" /><h2 className="text-lg font-bold mb-2">검색된 대국 기록이 없습니다</h2>{canWrite ? <p className="text-xs">우측 하단 + 버튼으로 새 대국을 만드세요</p> : <p className="text-xs">우측 상단 로그인 후 기록을 추가할 수 있습니다</p>}</div>
             ) : (
-              displayedGames.map(game => (
-                <div key={game.id} onClick={() => setSelectedGameId(game.id)} className="bg-white p-4 rounded-[20px] shadow-sm border border-gray-100 relative cursor-pointer hover:shadow-md transition-shadow active:scale-[0.98]">
-                  <div className="flex justify-between items-center mb-1">
-                      <span className="text-xs text-gray-400 font-medium">{game.date}</span>
-                      <div className="flex items-center gap-1.5">
-                        <span className={`text-[10px] font-bold px-2 py-1 rounded ${game.status === '종료' ? 'text-gray-600 bg-gray-100' : 'text-[#2E7D32] bg-green-50'}`}>{game.rounds.length}국</span>
-                        <span className={`text-[10px] font-bold px-2 py-1 rounded ${game.status === '종료' ? 'text-gray-500 bg-gray-200' : 'text-[#2E7D32] bg-green-50'}`}>{game.status}</span>
-                      </div>
-                  </div>
-                  <div className="flex justify-between items-center mb-3">
-                    <h3 className="font-bold text-[17px] text-gray-800 truncate pr-4 tracking-tight">{game.players.join(' · ')}</h3>
-                    <button onClick={(e) => handleDeleteGame(e, game.id)} className="text-red-400 hover:text-red-500 p-1"><Trash2 size={16} /></button>
-                  </div>
-                  {game.status === '종료' && game.finalResults ? (
-                    <div className={`bg-gray-50 rounded-xl p-3.5 border border-gray-100 grid gap-x-4 gap-y-3 mt-1 ${game.type === '4인' ? 'grid-cols-2' : 'grid-cols-1'}`}>
-                      {game.players.map((p, i) => (
-                        <div key={i} className="flex justify-between items-center">
-                          <div className="flex items-center gap-1.5">
-                            <span className={`text-[10px] font-black ${i===0?'text-[#2E7D32]':i===1?'text-orange-500':i===2?'text-gray-500':'text-blue-600'}`}>{['東','南','西','北'][i]}</span>
-                            <span className="text-[13px] font-bold text-gray-700 truncate w-14">{p}</span>
-                          </div>
-                          <div className="flex flex-col items-end">
-                            <span className={`text-[13px] font-black leading-none ${game.finalResults[i].pt > 0 ? 'text-[#2E7D32]' : game.finalResults[i].pt < 0 ? 'text-red-500' : 'text-gray-500'}`}>{game.finalResults[i].pt > 0 ? '+' : ''}{game.finalResults[i].pt}</span>
-                            <span className="text-[10px] font-medium text-gray-400 leading-none mt-1.5">{Number(game.finalResults[i].score).toLocaleString()}</span>
-                          </div>
-                        </div>
-                      ))}
+              displayedGames.map(game => {
+                const isYakuman = hasYakuman(game);
+                return (
+                  <div key={game.id} onClick={() => setSelectedGameId(game.id)} className={`bg-white p-4 rounded-[20px] shadow-sm relative cursor-pointer hover:shadow-md transition-shadow active:scale-[0.98] ${isYakuman ? 'border-2 border-red-500 shadow-[0_0_15px_rgba(239,68,68,0.3)]' : 'border border-gray-100'}`}>
+                    {isYakuman && <span className="absolute -top-3 -right-2 bg-gradient-to-r from-red-500 to-yellow-500 text-white text-[10px] font-black px-2 py-1 rounded-full shadow-md animate-pulse">역만 대국🔥</span>}
+                    <div className="flex justify-between items-center mb-1">
+                        <span className="text-xs text-gray-400 font-medium">{game.date}</span>
+                        <div className="flex items-center gap-1.5"><span className={`text-[10px] font-bold px-2 py-1 rounded ${game.status === '종료' ? 'text-gray-600 bg-gray-100' : 'text-[#2E7D32] bg-green-50'}`}>{game.rounds.length}국</span><span className={`text-[10px] font-bold px-2 py-1 rounded ${game.status === '종료' ? 'text-gray-500 bg-gray-200' : 'text-[#2E7D32] bg-green-50'}`}>{game.status}</span></div>
                     </div>
-                  ) : (
-                    <div className="flex gap-2.5 text-[11px] font-medium mt-1">{game.players.map((p, i) => (<span key={i} className="text-gray-600"><span className={`font-bold ${i===0?'text-[#2E7D32]':i===1?'text-orange-500':i===2?'text-gray-500':'text-blue-600'}`}>{['동','남','서','북'][i]}</span> {p}</span>))}</div>
-                  )}
-                </div>
-              ))
+                    <div className="flex justify-between items-center mb-3">
+                      <h3 className="font-bold text-base text-gray-800 truncate pr-4 tracking-tight">{game.players.join(' · ')}</h3>
+                      {canWrite && <button onClick={(e) => handleDeleteGame(e, game.id)} className="text-red-300 hover:text-red-500 p-1"><Trash2 size={16} /></button>}
+                    </div>
+                    {game.status === '종료' && game.finalResults ? (
+                      <div className={`bg-gray-50 rounded-xl p-3 border border-gray-100 grid gap-x-4 gap-y-2 mt-1 ${game.type === '4인' ? 'grid-cols-2' : 'grid-cols-1'}`}>
+                        {game.players.map((p, i) => (
+                          <div key={i} className="flex justify-between items-center"><div className="flex items-center gap-1.5"><span className="text-[10px] font-black text-[#2E7D32]">{['동','남','서','북'][i]}</span><span className="text-[12px] font-bold text-gray-700 truncate w-14">{p}</span></div><div className="flex flex-col items-end"><span className={`text-[12px] font-black leading-none ${game.finalResults[i].pt > 0 ? 'text-[#2E7D32]' : game.finalResults[i].pt < 0 ? 'text-red-500' : 'text-gray-500'}`}>{game.finalResults[i].pt > 0 ? '+' : ''}{game.finalResults[i].pt}</span><span className="text-[9px] font-medium text-gray-400 leading-none mt-1">{Number(game.finalResults[i].score).toLocaleString()}</span></div></div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="flex gap-2 text-[10px] font-medium mt-1">{game.players.map((p, i) => (<span key={i} className="text-gray-600"><span className="font-bold text-[#2E7D32]">{['동','남','서','북'][i]}</span> {p}</span>))}</div>
+                    )}
+                  </div>
+                );
+              })
             )}
-            <div className="fixed bottom-20 right-6 z-20">
-              <button onClick={() => setIsNewGameModalOpen(true)} className="bg-[#2E7D32] text-white p-4 rounded-full shadow-lg hover:bg-green-800 active:scale-95 transition-transform"><Plus size={28} strokeWidth={3} /></button>
-            </div>
+            {canWrite && <div className="fixed bottom-20 right-6 z-20"><button onClick={() => setIsNewGameModalOpen(true)} className="bg-[#2E7D32] text-white p-4 rounded-full shadow-lg hover:bg-green-800 active:scale-95 transition-transform"><Plus size={28} strokeWidth={3} /></button></div>}
           </div>
         )}
 
         {/* ========================================= */}
-        {/* 화면 1-B: 대국 상세 화면 (기록 탭) */}
+        {/* 화면 1-B: 대국 상세 화면 */}
         {/* ========================================= */}
         {activeNav === '기록' && selectedGameId !== null && currentGame && (
           <div className="flex-1 flex flex-col">
-            <div className="bg-white border-b border-gray-200 grid grid-cols-4 divide-x divide-gray-100 text-center py-3 shadow-sm z-10 sticky top-0">
-              <div className="flex flex-col"><span className="text-xl font-black text-[#2E7D32]">{totalRecords}</span><span className="text-[10px] text-gray-500 font-bold">총 기록</span></div>
-              <div className="flex flex-col"><span className="text-xl font-black text-[#2E7D32]">{tsumoCount}</span><span className="text-[10px] text-gray-500 font-bold">쯔모</span></div>
-              <div className="flex flex-col"><span className="text-xl font-black text-orange-500">{ronCount}</span><span className="text-[10px] text-gray-500 font-bold">론</span></div>
-              <div className="flex flex-col"><span className="text-xl font-black text-gray-800">{avgHan}</span><span className="text-[10px] text-gray-500 font-bold">평균판수</span></div>
-            </div>
+            <div className="bg-white border-b border-gray-200 grid grid-cols-4 divide-x divide-gray-100 text-center py-2.5 shadow-sm z-10 sticky top-0"><div className="flex flex-col"><span className="text-lg font-black text-[#2E7D32]">{totalRecords}</span><span className="text-[9px] text-gray-500 font-bold">총 기록</span></div><div className="flex flex-col"><span className="text-lg font-black text-[#2E7D32]">{tsumoCount}</span><span className="text-[9px] text-gray-500 font-bold">쯔모</span></div><div className="flex flex-col"><span className="text-lg font-black text-orange-500">{ronCount}</span><span className="text-[9px] text-gray-500 font-bold">론</span></div><div className="flex flex-col"><span className="text-lg font-black text-gray-800">{avgHan}</span><span className="text-[9px] text-gray-500 font-bold">평균판수</span></div></div>
 
             <div className="p-4 pb-0">
-              <div className="bg-[#2E7D32] bg-opacity-5 p-3 rounded-xl border border-green-100 flex justify-between items-center text-sm font-bold shadow-inner">
-                {players.map((p, i) => (
-                  <div key={i} className={`text-center flex-1 ${i>0 && 'border-l border-green-200 border-opacity-50'}`}><span className={`block text-[10px] mb-0.5 ${i===0?'text-[#2E7D32]':i===1?'text-orange-500':i===2?'text-gray-500':'text-blue-600'}`}>{['東(동)','南(남)','西(서)','北(북)'][i]}</span>{p}</div>
-                ))}
-              </div>
+              <div className="bg-[#2E7D32] bg-opacity-5 p-3 rounded-xl border border-green-100 flex justify-between items-center text-sm font-bold shadow-inner">{players.map((p, i) => (<div key={i} className={`text-center flex-1 ${i>0 && 'border-l border-green-200 border-opacity-50'}`}><span className="block text-[9px] mb-0.5 text-[#2E7D32]">{['동','남','서','북'][i]}</span>{p}</div>))}</div>
 
               {currentGame.status === '종료' && currentGame.finalResults && (
-                <div className="bg-[#1e293b] text-white rounded-xl p-5 mt-4 relative shadow-lg animate-in fade-in">
-                  <button onClick={handleOpenEndGame} className="absolute top-4 right-4 text-[11px] font-bold bg-gray-700 hover:bg-gray-600 px-3 py-1.5 rounded flex items-center gap-1 transition-colors"><Edit size={12}/> 수정</button>
-                  <h3 className="font-bold text-lg mb-4 flex items-center gap-2"><Trophy size={20} className="text-yellow-400"/> 최종 대국 결과</h3>
-                  <div className="space-y-2">
-                    {players.map((p, i) => (
-                      <div key={i} className="flex justify-between items-center py-2 border-b border-gray-700 last:border-0"><span className="font-bold">{p}</span><div className="flex items-center gap-4 text-right"><span className="w-20 font-medium text-gray-300">{Number(currentGame.finalResults[i].score).toLocaleString()}점</span><span className={`w-14 font-black text-lg ${parseFloat(currentGame.finalResults[i].pt) > 0 ? 'text-green-400' : parseFloat(currentGame.finalResults[i].pt) < 0 ? 'text-red-400' : 'text-gray-400'}`}>{parseFloat(currentGame.finalResults[i].pt) > 0 ? '+' : ''}{currentGame.finalResults[i].pt}</span></div></div>
-                    ))}
-                  </div>
+                <div className="bg-[#1e293b] text-white rounded-xl p-4 mt-4 relative shadow-lg animate-in fade-in">
+                  {canWrite && <button onClick={handleOpenEndGame} className="absolute top-3 right-3 text-[10px] font-bold bg-gray-700 hover:bg-gray-600 px-2 py-1 rounded flex items-center gap-1 transition-colors"><Edit size={10}/> 수정</button>}
+                  <h3 className="font-bold text-base mb-3 flex items-center gap-2"><Trophy size={16} className="text-yellow-400"/> 대국 결과</h3>
+                  <div className="space-y-1.5">{players.map((p, i) => (<div key={i} className="flex justify-between items-center py-1.5 border-b border-gray-700 last:border-0 text-sm"><span className="font-bold">{p}</span><div className="flex items-center gap-3 text-right"><span className="w-16 font-medium text-gray-300 text-xs">{Number(currentGame.finalResults[i].score).toLocaleString()}</span><span className={`w-12 font-black ${parseFloat(currentGame.finalResults[i].pt) > 0 ? 'text-green-400' : parseFloat(currentGame.finalResults[i].pt) < 0 ? 'text-red-400' : 'text-gray-400'}`}>{parseFloat(currentGame.finalResults[i].pt) > 0 ? '+' : ''}{currentGame.finalResults[i].pt}</span></div></div>))}</div>
                 </div>
               )}
-              {currentGame.status === '진행중' && (
-                <button onClick={handleOpenEndGame} className="w-full bg-[#1e293b] text-white font-bold py-4 rounded-xl mt-4 flex justify-center items-center gap-2 hover:bg-gray-800 transition-colors shadow-md"><Flag size={20} /> 대국 종료 및 점수 입력</button>
+              {currentGame.status === '진행중' && canWrite && (
+                <button onClick={handleOpenEndGame} className="w-full bg-[#1e293b] text-white font-bold py-3.5 rounded-xl mt-4 flex justify-center items-center gap-2 hover:bg-gray-800 transition-colors shadow-md text-sm"><Flag size={16} /> 대국 종료 및 점수 입력</button>
               )}
             </div>
 
-            <div className="p-4 space-y-4">
+            <div className="p-4 space-y-3">
               {records.length === 0 ? (
                 <div className="text-center py-10 text-gray-400 font-bold"><p>우측 하단의 + 버튼을 눌러</p><p>첫 번째 국을 기록해주세요!</p></div>
               ) : (
                 records.map(record => (
-                  <div key={record.id} className={`rounded-2xl p-4 shadow-sm border relative animate-in fade-in slide-in-from-bottom-2 ${record.type === '유국' ? 'bg-gray-50 border-gray-300' : 'bg-white border-gray-100'}`}>
-                    <div className="flex justify-between items-center mb-3">
+                  <div key={record.id} className={`rounded-xl p-3 shadow-sm border relative animate-in fade-in slide-in-from-bottom-2 ${record.type === '촌보' ? 'bg-red-50 border-red-200' : record.type === '유국' ? 'bg-gray-50 border-gray-300' : 'bg-white border-gray-100'}`}>
+                    <div className="flex justify-between items-center mb-2">
                       <div className="flex items-center gap-2">
-                        {record.type === '화료' ? <span className="bg-[#2E7D32] bg-opacity-10 text-[#2E7D32] px-2 py-0.5 rounded font-bold text-sm">{record.han}판</span> : <span className="bg-gray-200 text-gray-600 px-2 py-0.5 rounded font-bold text-sm">유국</span>}
-                        <span className="font-bold text-gray-800">{record.wind}{record.roundNum}국 {record.honba > 0 && `${record.honba}본`}</span>
+                        {record.type === '화료' && <span className="bg-[#2E7D32] bg-opacity-10 text-[#2E7D32] px-2 py-0.5 rounded font-bold text-[11px]">{record.han}판</span>}
+                        {record.type === '유국' && <span className="bg-gray-200 text-gray-600 px-2 py-0.5 rounded font-bold text-[11px]">유국</span>}
+                        {record.type === '촌보' && <span className="bg-red-200 text-red-700 px-2 py-0.5 rounded font-bold text-[11px]">촌보</span>}
+                        <span className="font-bold text-gray-800 text-sm">{record.wind}{record.roundNum}국 {record.honba > 0 && `${record.honba}본`}</span>
                       </div>
-                      <button onClick={() => handleDeleteRound(record.id)} className="text-red-400 hover:text-red-600 p-1"><Trash2 size={18} /></button>
+                      {canWrite && <button onClick={() => handleDeleteRound(record.id)} className="text-red-300 hover:text-red-500 p-1"><Trash2 size={14} /></button>}
                     </div>
+
                     {record.type === '화료' ? (
                       <>
-                        <div className="flex items-center gap-3 mb-3"><span className={`font-bold text-sm ${record.winType === '쯔모' ? 'text-[#2E7D32]' : 'text-orange-500'}`}>{record.winType}</span><span className="font-bold text-lg text-gray-800">{record.winner} {record.winType === '론' && <span className="text-gray-400 text-sm font-medium mx-2">← {record.loser}</span>}</span></div>
-                        <div className="flex flex-wrap gap-1.5 mb-2">
-                          <span className="bg-gray-100 text-gray-600 text-[11px] px-2 py-1 rounded font-bold border border-gray-200">{record.waitType}</span>
-                          {record.menzen === '멘젠' && <span className="bg-green-50 text-green-700 text-[11px] px-2 py-1 rounded font-bold border border-green-100">멘젠</span>}
-                          {record.selectedYaku.map(yaku => <span key={yaku} className="bg-green-50 text-green-700 text-[11px] px-2 py-1 rounded font-bold border border-green-100">{yaku} {record.furoDecreased.includes(yaku) && '(-1판)'}</span>)}
-                          {(record.dora > 0 || record.aka > 0 || record.ura > 0) && <span className="bg-yellow-50 text-yellow-700 text-[11px] px-2 py-1 rounded font-bold border border-yellow-200">도라 {record.dora + record.aka + record.ura}</span>}
-                        </div>
-                        <div className="text-xs text-gray-400 font-bold mt-2">{record.han}판 {record.fu}부</div>
+                        <div className="flex items-center gap-2 mb-2"><span className={`font-bold text-[11px] ${record.winType === '쯔모' ? 'text-[#2E7D32]' : 'text-orange-500'}`}>{record.winType}</span><span className="font-bold text-sm text-gray-800">{record.winner} {record.winType === '론' && <span className="text-gray-400 text-xs font-medium mx-1">← {record.loser}</span>}</span>{record.score && <span className="ml-auto font-black text-[#2E7D32] text-xs">{Number(record.score).toLocaleString()}점</span>}</div>
+                        <div className="flex flex-wrap gap-1 mb-1.5"><span className="bg-gray-100 text-gray-600 text-[9px] px-1.5 py-0.5 rounded font-bold">{record.waitType}</span><span className="bg-gray-100 text-gray-600 text-[9px] px-1.5 py-0.5 rounded font-bold">{record.menzen}</span>{record.selectedYaku?.map(yaku => <span key={yaku} className="bg-green-50 text-green-700 text-[9px] px-1.5 py-0.5 rounded font-bold border border-green-100">{yaku} {record.furoDecreased.includes(yaku) && '(-1판)'}</span>)}{(record.dora + record.aka + record.ura + record.pei) > 0 && (<span className="bg-amber-50 text-amber-600 text-[9px] px-1.5 py-0.5 rounded font-bold border border-amber-200">도라합 {record.dora + record.aka + record.ura + record.pei}</span>)}</div>
+                        <div className="text-[10px] text-gray-400 font-bold mt-1">{record.han}판 {record.fu}부</div>
                       </>
+                    ) : record.type === '유국' ? (
+                      <div className="space-y-1.5 mt-1"><div className="flex items-center gap-1.5"><ShieldAlert size={14} className="text-gray-500" /><span className="font-bold text-gray-800 text-sm">{record.abortiveType ? `도중유국 (${record.abortiveType})` : '황패유국'}</span></div>{!record.abortiveType && (<div className="text-[11px] font-bold text-gray-600 pl-5 space-y-0.5"><p className="text-gray-500">텐파이: <span className="text-gray-800">{record.tenpaiPlayers.length > 0 ? record.tenpaiPlayers.join(', ') : '전원 노텐'}</span></p>{record.nagashiMangan?.length > 0 && (<p className="text-gray-500 mt-1">유국만관: {record.nagashiMangan.map(p => <span key={p} className="bg-red-100 text-red-600 px-1.5 py-0.5 rounded ml-1">{p}</span>)}</p>)}</div>)}</div>
                     ) : (
-                      <div className="space-y-2 mt-1">
-                        <div className="flex items-center gap-2"><ShieldAlert size={18} className="text-gray-500" /><span className="font-bold text-gray-800 text-lg">{record.abortiveType ? `도중유국 (${record.abortiveType})` : '황패유국'}</span></div>
-                        {!record.abortiveType && (
-                          <div className="text-sm font-bold text-gray-600 pl-6 space-y-1">
-                            {record.tenpaiPlayers.length > 0 ? <p>텐파이: <span className="text-[#2E7D32]">{record.tenpaiPlayers.join(', ')}</span></p> : <p className="text-gray-400">전원 노텐</p>}
-                            {record.nagashiMangan.length > 0 && <p>유국만관: <span className="text-orange-500">{record.nagashiMangan.join(', ')}</span></p>}
-                          </div>
-                        )}
-                      </div>
+                      <div className="space-y-1 mt-1"><div className="flex items-center gap-1.5"><AlertOctagon size={14} className="text-red-500" /><span className="font-bold text-red-700 text-sm">{record.chomboPlayer} 촌보</span></div><p className="text-xs font-bold text-red-500 pl-5">처리: {record.chomboType}</p></div>
                     )}
+                    {record.comment && (<div className="mt-2 pt-2 border-t border-gray-100 border-opacity-50 text-[10px] text-gray-500 font-medium flex gap-1"><MessageSquare size={12} className="mt-0.5" /> {record.comment}</div>)}
                   </div>
                 ))
               )}
             </div>
-            {currentGame.status === '진행중' && (
+            {currentGame.status === '진행중' && canWrite && (
               <div className="fixed bottom-20 right-6 z-20"><button onClick={() => setIsRoundModalOpen(true)} className="bg-[#2E7D32] text-white p-4 rounded-full shadow-lg hover:bg-green-800 active:scale-95 transition-transform"><Plus size={28} strokeWidth={3} /></button></div>
             )}
           </div>
@@ -386,59 +598,144 @@ function App() {
         {/* 화면 2: 📈 개인 통계 (Statistics) 페이지 */}
         {/* ========================================= */}
         {activeNav === '통계' && (
-          <div className="p-4 space-y-4">
-            <h2 className="font-bold text-gray-800 text-lg mb-2 pl-1">개인 플레이 통계</h2>
-            {personalStats.length === 0 ? (
-              <div className="text-center py-20 text-gray-400 font-bold bg-white rounded-2xl shadow-sm border border-gray-100">아직 종료된 대국 통계가 없습니다.</div>
-            ) : (
-              personalStats.map(stat => (
-                <div key={stat.name} className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden animate-in fade-in slide-in-from-bottom-2">
-                  <div className="bg-gray-50 p-4 border-b border-gray-100 flex justify-between items-center">
-                    <h3 className="font-bold text-xl text-gray-800">{stat.name}</h3>
-                    <span className="text-xs text-gray-500 font-bold bg-gray-200 px-2 py-1 rounded">{stat.roundsPlayed}국 참여</span>
-                  </div>
-                  
-                  <div className="p-4 grid grid-cols-2 gap-4">
-                    <div className="bg-green-50 p-3 rounded-xl border border-green-100 text-center"><span className="block text-xs text-gray-500 font-bold mb-1">화료율</span><span className="text-xl font-black text-[#2E7D32]">{stat.winRate}%</span></div>
-                    <div className="bg-orange-50 p-3 rounded-xl border border-orange-100 text-center"><span className="block text-xs text-gray-500 font-bold mb-1">방총율</span><span className="text-xl font-black text-orange-500">{stat.dealInRate}%</span></div>
-                    <div className="bg-gray-50 p-3 rounded-xl border border-gray-200 text-center"><span className="block text-xs text-gray-500 font-bold mb-1">평균 타점</span><span className="text-xl font-black text-gray-700">{stat.avgHan}판</span></div>
-                    <div className="bg-blue-50 p-3 rounded-xl border border-blue-100 text-center"><span className="block text-xs text-gray-500 font-bold mb-1">후로율 (울음)</span><span className="text-xl font-black text-blue-600">{stat.furoRate}%</span></div>
-                  </div>
+          <div className="flex-1 flex flex-col bg-[#F5F5DC]">
+            <div className="bg-white border-b border-gray-200 sticky top-0 z-10 shadow-sm">
+              <div className="flex text-sm">
+                {['전체', '4인', '3인'].map(t => (
+                  <button key={t} onClick={() => setStatsMainTab(t)} className={`flex-1 py-3 font-bold ${statsMainTab === t ? 'bg-[#2E7D32] text-white' : 'text-gray-500 bg-gray-50 border-b-2 border-gray-200 hover:bg-gray-100'}`}>{t} 게임</button>
+                ))}
+              </div>
+              <div className="flex text-[13px] border-t border-gray-200">
+                {['플레이어', '역', '화료'].map(t => (
+                  <button key={t} onClick={() => setStatsSubTab(t)} className={`flex-1 py-2.5 font-bold ${statsSubTab === t ? 'text-[#2E7D32] border-b-2 border-[#2E7D32]' : 'text-gray-400'}`}>{t}</button>
+                ))}
+              </div>
+            </div>
 
-                  <div className="px-4 pb-4 space-y-4">
-                    <div>
-                      <h4 className="text-xs font-bold text-gray-400 mb-2">선호 대기 형태</h4>
-                      <div className="flex h-3 bg-gray-100 rounded-full overflow-hidden">
-                        {Object.entries(stat.waitTypes).map(([type, count], i) => {
-                          const percent = (count / stat.winCount) * 100;
-                          const colors = ['bg-[#2E7D32]', 'bg-green-500', 'bg-lime-500', 'bg-yellow-500', 'bg-orange-500', 'bg-red-500'];
-                          return <div key={type} style={{width: `${percent}%`}} className={colors[i%colors.length]} title={`${type} ${percent.toFixed(0)}%`}></div>
-                        })}
-                      </div>
-                      <div className="flex flex-wrap gap-2 mt-2">
-                        {Object.entries(stat.waitTypes).sort((a,b)=>b[1]-a[1]).map(([type, count], i) => (
-                          <span key={type} className="text-[10px] font-bold text-gray-500">{type} {((count/stat.winCount)*100).toFixed(0)}%</span>
-                        ))}
-                      </div>
-                    </div>
-                    
-                    {stat.topYakus.length > 0 && (
-                      <div>
-                        <h4 className="text-xs font-bold text-gray-400 mb-2">자주 쓴 역 TOP 3</h4>
-                        <div className="flex gap-2">
-                          {stat.topYakus.map(([yaku, count], i) => (
-                            <div key={yaku} className="flex-1 bg-gray-50 border border-gray-200 rounded-lg p-2 text-center">
-                              <span className="block text-[11px] font-bold text-gray-600 truncate">{yaku}</span>
-                              <span className="text-sm font-black text-gray-800">{count}회</span>
+            <div className="p-4 pb-10">
+              {statsSubTab === '플레이어' && (
+                <div className="space-y-4">
+                  {playerStatsList.length === 0 ? (
+                    <div className="text-center py-20 text-gray-400 font-bold">아직 종료된 대국이 없습니다.</div>
+                  ) : (
+                    playerStatsList.map(stat => (
+                      <div key={stat.name} onClick={() => setSelectedStatPlayerName(stat.name)} className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden cursor-pointer hover:shadow-md transition-all active:scale-[0.98]">
+                        <div className="p-4 border-b border-gray-100 flex justify-between items-center">
+                          <div>
+                            <h3 className="font-bold text-xl text-gray-800">{stat.name}</h3>
+                            <span className="text-xs text-gray-500 font-bold mt-1 inline-block">{stat.gamesPlayed}전 ({stat.roundsPlayed}국)</span>
+                          </div>
+                          <div className="bg-green-50 p-3 rounded-xl border border-green-100 text-center min-w-[80px]">
+                            <span className="block text-[10px] text-gray-500 font-bold mb-0.5">현재 우마</span>
+                            <span className={`text-xl font-black ${stat.totalUma > 0 ? 'text-[#2E7D32]' : stat.totalUma < 0 ? 'text-red-500' : 'text-gray-700'}`}>{stat.totalUma > 0 ? '+' : ''}{stat.totalUma.toFixed(1)}</span>
+                          </div>
+                        </div>
+                        {stat.topYakus.length > 0 && (
+                          <div className="p-3 bg-gray-50">
+                            <h4 className="text-[10px] font-bold text-gray-400 mb-2">자주 쓴 역 TOP 5</h4>
+                            <div className="flex flex-wrap gap-1.5">
+                              {stat.topYakus.map(([yaku, count]) => (
+                                <span key={yaku} className="bg-white border border-gray-200 px-2 py-1 rounded text-[10px] font-bold text-gray-700 shadow-sm">{yaku} <span className="text-[#2E7D32] ml-0.5">{count}</span></span>
+                              ))}
                             </div>
-                          ))}
+                          </div>
+                        )}
+                      </div>
+                    ))
+                  )}
+                </div>
+              )}
+
+              {statsSubTab === '역' && (
+                <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-5">
+                  <h3 className="font-bold text-lg text-gray-800 mb-4 border-b pb-2">역별 출현 횟수 (전체)</h3>
+                  {globalYakuStats.length === 0 ? <p className="text-gray-400 text-sm text-center py-10">데이터가 없습니다.</p> : (
+                    <div className="space-y-3">
+                      {globalYakuStats.map(([yaku, count], i) => {
+                        const maxCount = globalYakuStats[0][1];
+                        const percent = (count / maxCount) * 100;
+                        return (
+                          <div key={yaku} onClick={() => openBreakdown(`${yaku} 출현 분포`, 'yaku', yaku)} className="flex items-center gap-3 cursor-pointer hover:bg-gray-50 p-1.5 -mx-1.5 rounded transition-colors active:scale-[0.98]">
+                            <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-black text-white ${i === 0 ? 'bg-yellow-400' : i === 1 ? 'bg-gray-400' : i === 2 ? 'bg-amber-600' : 'bg-gray-200 text-gray-500'}`}>{i + 1}</div>
+                            <span className="w-24 text-sm font-bold text-gray-700 truncate">{yaku}</span>
+                            <div className="flex-1 h-3 bg-gray-100 rounded-full overflow-hidden relative"><div className="h-full bg-green-500 rounded-full" style={{ width: `${percent}%` }}></div></div>
+                            <span className="w-8 text-right text-sm font-black text-[#2E7D32]">{count}회</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {statsSubTab === '화료' && (
+                <div className="space-y-4">
+                  {/* 리치/다마/후로 비율 (신규 추가) */}
+                  <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-5">
+                    <h3 className="font-bold text-lg text-gray-800 mb-4 border-b pb-2">전체 화료 비율</h3>
+                    {globalWinStats.winCount === 0 ? <p className="text-xs text-gray-400">데이터 없음</p> : (
+                      <div className="grid grid-cols-3 gap-2 bg-gray-50 p-3 rounded-lg text-center">
+                        <div onClick={() => openBreakdown('리치 화료 분포', 'winType', 'riichiWinCount')} className="cursor-pointer hover:bg-gray-200 p-2 rounded transition-colors active:scale-[0.98]">
+                          <span className="block text-[11px] font-bold text-red-600 mb-1">리치 화료율</span>
+                          <span className="text-lg font-black text-gray-800">{((globalWinStats.riichi / globalWinStats.winCount) * 100).toFixed(1)}%</span>
+                          <span className="block text-[10px] text-gray-500 mt-0.5">({globalWinStats.riichi}회)</span>
+                        </div>
+                        <div onClick={() => openBreakdown('다마텐 화료 분포', 'winType', 'damaWinCount')} className="cursor-pointer hover:bg-gray-200 p-2 rounded transition-colors active:scale-[0.98]">
+                          <span className="block text-[11px] font-bold text-gray-600 mb-1">다마 화료율</span>
+                          <span className="text-lg font-black text-gray-800">{((globalWinStats.dama / globalWinStats.winCount) * 100).toFixed(1)}%</span>
+                          <span className="block text-[10px] text-gray-500 mt-0.5">({globalWinStats.dama}회)</span>
+                        </div>
+                        <div onClick={() => openBreakdown('후로 화료 분포', 'winType', 'furoWinCount')} className="cursor-pointer hover:bg-gray-200 p-2 rounded transition-colors active:scale-[0.98]">
+                          <span className="block text-[11px] font-bold text-blue-600 mb-1">후로 화료율</span>
+                          <span className="text-lg font-black text-gray-800">{((globalWinStats.furoWin / globalWinStats.winCount) * 100).toFixed(1)}%</span>
+                          <span className="block text-[10px] text-gray-500 mt-0.5">({globalWinStats.furoWin}회)</span>
                         </div>
                       </div>
                     )}
                   </div>
+
+                  {/* 멘젠/비멘젠 비율 */}
+                  <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-5">
+                    <h3 className="font-bold text-lg text-gray-800 mb-4 border-b pb-2">화료 형태별 비율</h3>
+                    {globalWinStats.winCount === 0 ? <p className="text-xs text-gray-400">데이터 없음</p> : (
+                      <div className="space-y-3">
+                        {[
+                          { label: '멘젠 쯔모', key: 'menzenTsumo', count: globalWinStats.menzenTsumo, color: 'bg-green-500' },
+                          { label: '멘젠 론', key: 'menzenRon', count: globalWinStats.menzenRon, color: 'bg-[#2E7D32]' },
+                          { label: '비멘젠 쯔모', key: 'furoTsumo', count: globalWinStats.furoTsumo, color: 'bg-blue-400' },
+                          { label: '비멘젠 론', key: 'furoRon', count: globalWinStats.furoRon, color: 'bg-orange-400' }
+                        ].map(w => {
+                          const pct = ((w.count / globalWinStats.winCount) * 100).toFixed(1);
+                          return (
+                            <div key={w.label} onClick={() => openBreakdown(`${w.label} 분포`, 'winType', w.key)} className="cursor-pointer hover:bg-gray-50 p-2 -mx-2 rounded transition-colors active:scale-[0.98]">
+                              <div className="flex justify-between text-xs font-bold text-gray-700 mb-1"><span>{w.label}</span><span>{w.count}회 ({pct}%)</span></div>
+                              <div className="h-2.5 bg-gray-100 rounded-full overflow-hidden"><div className={`h-full ${w.color}`} style={{width: `${pct}%`}}></div></div>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    )}
+                  </div>
+                  
+                  {/* 대기 형태별 비율 */}
+                  <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-5">
+                    <h3 className="font-bold text-lg text-gray-800 mb-4 border-b pb-2">대기 형태별 비율</h3>
+                    <div className="space-y-3">
+                      {['양면', '샤보', '간짱', '변짱', '단기', '특수대기'].map(w => {
+                        const c = globalWinStats.wait[w] || 0;
+                        const pct = globalWinStats.winCount > 0 ? ((c / globalWinStats.winCount) * 100).toFixed(1) : 0;
+                        return (
+                          <div key={w} onClick={() => openBreakdown(`${w} 대기 분포`, 'wait', w)} className="cursor-pointer hover:bg-gray-50 p-2 -mx-2 rounded transition-colors active:scale-[0.98]">
+                            <div className="flex justify-between text-xs font-bold text-gray-700 mb-1"><span>{w}</span><span>{c}회 ({pct}%)</span></div>
+                            <div className="h-2.5 bg-gray-100 rounded-full overflow-hidden"><div className="h-full bg-gray-600" style={{width: `${pct}%`}}></div></div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
                 </div>
-              ))
-            )}
+              )}
+            </div>
           </div>
         )}
 
@@ -446,65 +743,280 @@ function App() {
         {/* 화면 3: 🏆 전체 랭킹 페이지 */}
         {/* ========================================= */}
         {activeNav === '랭킹' && (
-          <div className="p-4 space-y-3">
-            <h2 className="font-bold text-gray-800 text-lg mb-2 pl-1">마작 순위</h2>
-            {rankingData.length === 0 ? (
-              <div className="text-center py-20 text-gray-400 font-bold bg-white rounded-2xl shadow-sm border border-gray-100"><Trophy size={48} className="mx-auto mb-4 text-gray-300" /><p>아직 종료된 대국이 없어</p><p>순위를 매길 수 없습니다.</p></div>
-            ) : (
-              rankingData.map((player, index) => (
-                <div key={player.name} className="bg-white p-4 rounded-[20px] shadow-sm border border-gray-100 flex items-center justify-between animate-in fade-in slide-in-from-bottom-2">
-                  <div className="flex items-center gap-4">
-                    <div className={`w-10 h-10 rounded-full flex items-center justify-center font-black text-white shadow-inner text-lg ${index === 0 ? 'bg-yellow-400' : index === 1 ? 'bg-gray-400' : index === 2 ? 'bg-amber-600' : 'bg-gray-200 text-gray-600'}`}>{index + 1}</div>
-                    <div>
-                      <h3 className="font-bold text-lg text-gray-800">{player.name}</h3>
-                      <div className="text-[11px] text-gray-500 font-bold mt-0.5 flex gap-2"><span>{player.playCount}전</span><span className="text-gray-300">|</span><span>1위 {player.ranks[0]}회</span><span className="text-gray-300">|</span><span>연대율 {((player.ranks[0] + player.ranks[1]) / player.playCount * 100).toFixed(1)}%</span></div>
-                    </div>
-                  </div>
-                  <div className="text-right">
-                    <div className={`text-xl font-black tracking-tighter ${player.totalPt > 0 ? 'text-[#2E7D32]' : player.totalPt < 0 ? 'text-red-500' : 'text-gray-500'}`}>{player.totalPt > 0 ? '+' : ''}{player.totalPt.toFixed(1)}</div>
-                    <div className="text-[10px] text-gray-400 font-bold mt-0.5 bg-gray-50 px-2 py-0.5 rounded inline-block">평균 {(player.totalPt / player.playCount).toFixed(1)}</div>
-                  </div>
+          <div className="flex-1 flex flex-col bg-[#F5F5DC]">
+            <div className="flex bg-white border-b border-gray-200 shadow-sm z-10 sticky top-0 text-sm">
+              {['전체', '4인', '3인'].map(t => (
+                <button key={t} onClick={() => setRankingMainTab(t)} className={`flex-1 py-3 font-bold ${rankingMainTab === t ? 'bg-[#2E7D32] text-white' : 'text-gray-500 bg-gray-50 border-b-2 border-gray-200 hover:bg-gray-100'}`}>{t} 순위</button>
+              ))}
+            </div>
+            
+            <div className="p-4 space-y-4">
+              <div className="bg-white p-3 rounded-xl shadow-sm border border-gray-200 flex items-center justify-between">
+                <span className="text-xs font-bold text-gray-500 flex items-center gap-1"><BarChart2 size={14}/> 정렬 기준</span>
+                <select value={rankingSort} onChange={e=>setRankingSort(e.target.value)} className="bg-gray-50 border border-gray-200 text-gray-800 text-sm font-bold rounded-lg px-2 py-1.5 focus:outline-none">
+                  <option value="totalUma">누적 우마 (PT)</option>
+                  <option value="avgUma">평균 우마</option>
+                  <option value="maxScore">최고 점수</option>
+                  <option value="firstRate">1위율 (%)</option>
+                  <option value="rentaiRate">연대율 (%)</option>
+                  <option value="tobiRate">들통율 (%)</option>
+                  <option value="gameCount">대국 수</option>
+                </select>
+              </div>
+
+              {rankingList.length === 0 ? (
+                <div className="text-center py-20 text-gray-400 font-bold bg-white rounded-2xl shadow-sm border border-gray-100"><Trophy size={48} className="mx-auto mb-4 text-gray-300" /><p>아직 종료된 대국이 없어</p><p>순위를 매길 수 없습니다.</p></div>
+              ) : (
+                <div className="space-y-3">
+                  {rankingList.map((player) => {
+                    let highlightText = ''; let highlightLabel = '';
+                    if(rankingSort === 'totalUma') { highlightText = (player.totalUma>0?'+':'')+player.totalUma.toFixed(1); highlightLabel = '우마 합'; }
+                    if(rankingSort === 'avgUma') { highlightText = (player.avgUma>0?'+':'')+player.avgUma; highlightLabel = '평균 우마'; }
+                    if(rankingSort === 'maxScore') { highlightText = Number(player.maxScore).toLocaleString(); highlightLabel = '최고 점수'; }
+                    if(rankingSort === 'firstRate') { highlightText = player.firstRate+'%'; highlightLabel = '1위율'; }
+                    if(rankingSort === 'rentaiRate') { highlightText = player.rentaiRate+'%'; highlightLabel = '연대율'; }
+                    if(rankingSort === 'tobiRate') { highlightText = player.tobiRate+'%'; highlightLabel = '들통율'; }
+                    if(rankingSort === 'gameCount') { highlightText = player.gamesPlayed+'전'; highlightLabel = '대국 수'; }
+
+                    return (
+                      <div key={player.name} className="bg-white p-4 rounded-[20px] shadow-sm border border-gray-100 flex items-center justify-between animate-in fade-in slide-in-from-bottom-2">
+                        <div className="flex items-center gap-4">
+                          {/* 💡 공동 순위 적용 완료 */}
+                          <div className={`w-10 h-10 rounded-full flex items-center justify-center font-black text-white shadow-inner text-lg ${player.rank === 1 ? 'bg-yellow-400' : player.rank === 2 ? 'bg-gray-400' : player.rank === 3 ? 'bg-amber-600' : 'bg-gray-200 text-gray-600'}`}>{player.rank}</div>
+                          <div>
+                            <h3 className="font-bold text-base text-gray-800 leading-tight">{player.name}</h3>
+                            <div className="text-[10px] text-gray-500 font-bold mt-1 flex gap-1.5 items-center">
+                              <span className="bg-gray-100 px-1.5 py-0.5 rounded">{player.gamesPlayed}전</span>
+                              <span className="bg-green-50 text-green-700 px-1.5 py-0.5 rounded">1위 {player.firstRate}%</span>
+                              <span className="bg-orange-50 text-orange-700 px-1.5 py-0.5 rounded">연대 {player.rentaiRate}%</span>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="text-right flex flex-col items-end">
+                          <div className={`text-lg font-black tracking-tighter ${rankingSort==='totalUma'||rankingSort==='avgUma' ? (parseFloat(highlightText)>0?'text-[#2E7D32]':parseFloat(highlightText)<0?'text-red-500':'text-gray-500') : 'text-gray-800'}`}>{highlightText}</div>
+                          <div className="text-[9px] text-gray-400 font-bold mt-0.5">{highlightLabel}</div>
+                        </div>
+                      </div>
+                    )
+                  })}
                 </div>
-              ))
-            )}
+              )}
+            </div>
           </div>
         )}
       </main>
 
-      {/* 모달들 */}
-      {isEndGameModalOpen && (
-        <div className="absolute inset-0 bg-black bg-opacity-60 z-[60] flex flex-col justify-end animate-in fade-in">
-          <div className="bg-[#F5F5DC] w-full h-[70%] rounded-t-3xl shadow-2xl flex flex-col animate-in slide-in-from-bottom">
-            <div className="bg-[#1e293b] rounded-t-3xl p-5 flex justify-between items-center text-white"><h2 className="text-xl font-bold flex items-center gap-2"><Flag size={20} /> 대국 결과 입력</h2><button onClick={() => setIsEndGameModalOpen(false)} className="p-1 hover:bg-gray-700 rounded-full"><X size={24} /></button></div>
-            <div className="p-6 flex-1 overflow-y-auto space-y-6">
-              <div className="bg-yellow-50 border border-yellow-200 text-yellow-800 p-4 rounded-xl text-sm font-bold shadow-sm">⚠️ 소점 총합은 {players.length === 4 ? '100,000' : '105,000'}점이어야 합니다.<br/>현재 입력 합계: <span className="text-red-500">{finalScores.reduce((sum, f) => sum + (parseInt(f.score) || 0), 0).toLocaleString()}점</span></div>
-              <div className="space-y-3">
-                {players.map((p, i) => (
-                  <div key={i} className="flex gap-4 items-center bg-white p-4 rounded-xl border border-gray-200 shadow-sm"><span className="w-16 font-bold truncate text-gray-800 text-lg">{p}</span><input type="number" placeholder="최종 소점 (예: 25000)" value={finalScores[i]?.score || ''} onChange={(e) => updateFinalScore(i, e.target.value)} className="flex-1 p-3 bg-gray-50 border border-gray-200 rounded-lg text-right font-bold text-lg focus:outline-none focus:border-[#2E7D32]" /></div>
-                ))}
-              </div>
-              <p className="text-center text-gray-400 text-xs font-bold mt-2">※ PT(우마/오카)는 룰에 맞게 자동 계산됩니다.</p>
+      {/* 💡 세부 분포 모달 (역, 대기, 화료형태 클릭 시) */}
+      {breakdownData && (
+        <div className="absolute inset-0 bg-black bg-opacity-60 z-[100] flex items-center justify-center p-4 animate-in fade-in">
+          <div className="bg-white w-full max-w-sm rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[70vh]">
+            <div className="bg-[#1e293b] p-4 flex justify-between items-center text-white">
+              <h3 className="font-bold text-lg">{breakdownData.title}</h3>
+              <button onClick={() => setBreakdownData(null)} className="p-1 hover:bg-gray-700 rounded-full"><X size={20}/></button>
             </div>
-            <div className="p-5 bg-white border-t border-gray-200 shadow-md"><button onClick={handleConfirmEndGame} className="w-full bg-[#1e293b] text-white font-bold text-lg py-4 rounded-xl hover:bg-gray-800 active:scale-[0.98] transition-all">결과 저장 및 대국 종료</button></div>
+            <div className="p-4 overflow-y-auto space-y-3">
+              {breakdownData.data.length === 0 ? (
+                <p className="text-center text-gray-400 py-4 font-bold text-sm">기록된 데이터가 없습니다.</p>
+              ) : (
+                breakdownData.data.map((item, idx) => {
+                  const maxCount = breakdownData.data[0].count;
+                  const pct = (item.count / maxCount) * 100;
+                  return (
+                    <div key={item.name} className="flex items-center gap-3">
+                      <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-black text-white ${idx === 0 ? 'bg-yellow-400' : idx === 1 ? 'bg-gray-400' : idx === 2 ? 'bg-amber-600' : 'bg-gray-200 text-gray-500'}`}>{idx + 1}</div>
+                      <span className="w-20 text-sm font-bold text-gray-700 truncate">{item.name}</span>
+                      <div className="flex-1 h-2 bg-gray-100 rounded-full overflow-hidden">
+                        <div className="h-full bg-[#2E7D32]" style={{ width: `${pct}%` }}></div>
+                      </div>
+                      <span className="w-8 text-right text-sm font-black text-[#2E7D32]">{item.count}회</span>
+                    </div>
+                  )
+                })
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================= */}
+      {/* 👤 개인 통계 상세 모달 (Player Detail) */}
+      {/* ========================================= */}
+      {selectedStatPlayer && (
+        <div className="absolute inset-0 bg-black bg-opacity-70 z-[90] flex flex-col justify-end animate-in fade-in">
+          <div className="bg-[#F5F5DC] w-full h-[90%] rounded-t-3xl shadow-2xl flex flex-col animate-in slide-in-from-bottom">
+            <div className="bg-[#1e293b] rounded-t-3xl p-4 flex justify-between items-center text-white">
+              <div>
+                <h2 className="text-xl font-bold flex items-center gap-2"><PieChart size={20}/> {selectedStatPlayer.name}</h2>
+                <select value={selectedSeason} onChange={(e) => setSelectedSeason(e.target.value)} className="bg-gray-700 text-white text-[10px] font-bold py-1 px-2 mt-1 rounded appearance-none focus:outline-none">
+                  <option value="all">전체 시즌</option>
+                  {seasons.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                </select>
+              </div>
+              <button onClick={() => setSelectedStatPlayerName(null)} className="p-1.5 hover:bg-gray-700 rounded-full transition-colors bg-gray-800"><X size={20}/></button>
+            </div>
+            
+            <div className="flex-1 overflow-y-auto p-4 space-y-4">
+              <div className="grid grid-cols-2 gap-3">
+                <div className="bg-white p-3 rounded-xl shadow-sm border border-gray-200 text-center"><span className="block text-[10px] text-gray-500 font-bold mb-1">대국 수</span><span className="text-xl font-black text-gray-800">{selectedStatPlayer.gamesPlayed}전</span></div>
+                <div className="bg-green-50 p-3 rounded-xl shadow-sm border border-green-200 text-center"><span className="block text-[10px] text-green-700 font-bold mb-1">현재 우마</span><span className={`text-xl font-black ${selectedStatPlayer.totalUma > 0 ? 'text-[#2E7D32]' : selectedStatPlayer.totalUma < 0 ? 'text-red-500' : 'text-gray-800'}`}>{selectedStatPlayer.totalUma > 0 ? '+' : ''}{selectedStatPlayer.totalUma.toFixed(1)}</span></div>
+              </div>
+
+              <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
+                <h3 className="text-sm font-bold text-gray-800 mb-3 flex items-center gap-1.5"><BarChart size={16}/> 상세 통계</h3>
+                <div className="grid grid-cols-4 gap-2 text-center text-sm font-medium mb-3">
+                  <div className="flex flex-col gap-1"><span className="text-[10px] text-gray-500 font-bold">화료수</span><span className="font-black text-[#2E7D32]">{selectedStatPlayer.winCount}회</span></div>
+                  <div className="flex flex-col gap-1"><span className="text-[10px] text-gray-500 font-bold">방총수</span><span className="font-black text-orange-500">{selectedStatPlayer.dealInCount}회</span></div>
+                  <div className="flex flex-col gap-1"><span className="text-[10px] text-gray-500 font-bold">역만수</span><span className="font-black text-red-600">{selectedStatPlayer.yakumanCount}회</span></div>
+                  <div className="flex flex-col gap-1"><span className="text-[10px] text-gray-500 font-bold">쵼보수</span><span className="font-black text-purple-600">{selectedStatPlayer.chomboCount}회</span></div>
+                </div>
+
+                <div className="grid grid-cols-4 gap-2 text-center text-sm font-medium mb-3 bg-gray-50 p-2 rounded-lg">
+                  {[1, 2, 3, 4].map(rank => {
+                    const count = selectedStatPlayer.ranks[rank-1];
+                    const pct = selectedStatPlayer.gamesPlayed > 0 ? ((count / selectedStatPlayer.gamesPlayed) * 100).toFixed(0) : 0;
+                    return (
+                      <div key={rank} className="flex flex-col gap-0.5"><span className="text-[10px] font-bold text-gray-600">{rank}등수</span><span className="font-black text-gray-800">{count}회</span><span className="text-[9px] text-gray-400">({pct}%)</span></div>
+                    )
+                  })}
+                </div>
+
+                <div className="grid grid-cols-2 gap-2 text-center text-sm font-medium">
+                  <div className="flex flex-col gap-1 border border-blue-100 bg-blue-50 py-2 rounded-lg"><span className="text-[10px] text-blue-700 font-bold">연대율</span><span className="font-black text-blue-600 text-base">{selectedStatPlayer.rentaiRate}%</span></div>
+                  <div className="flex flex-col gap-1 border border-slate-200 bg-slate-50 py-2 rounded-lg"><span className="text-[10px] text-slate-600 font-bold">들통율 (토비)</span><span className="font-black text-slate-700 text-base">{selectedStatPlayer.tobiCount}회 <span className="text-xs font-medium">({selectedStatPlayer.tobiRate}%)</span></span></div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-4 gap-2 text-center">
+                <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-2"><span className="block text-[9px] text-gray-500 font-bold mb-1">최고 점수</span><span className="text-sm font-black text-gray-800">{selectedStatPlayer.maxScore === -99999 ? '-' : Number(selectedStatPlayer.maxScore).toLocaleString()}</span></div>
+                <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-2"><span className="block text-[9px] text-gray-500 font-bold mb-1">최소 점수</span><span className="text-sm font-black text-gray-800">{selectedStatPlayer.minScore === 99999 ? '-' : Number(selectedStatPlayer.minScore).toLocaleString()}</span></div>
+                <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-2"><span className="block text-[9px] text-gray-500 font-bold mb-1">평균 소점</span><span className="text-sm font-black text-gray-800">{Number(selectedStatPlayer.avgScore).toLocaleString()}</span></div>
+                <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-2"><span className="block text-[9px] text-gray-500 font-bold mb-1">평균 타점</span><span className="text-sm font-black text-[#2E7D32]">{Number(selectedStatPlayer.avgWinScore).toLocaleString()}</span></div>           
+                <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-2"><span className="block text-[9px] text-gray-500 font-bold mb-1">평균 순위</span><span className="text-sm font-black text-amber-600">{selectedStatPlayer.avgRank}위</span></div>
+                <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-2"><span className="block text-[9px] text-gray-500 font-bold mb-1">평균 우마</span><span className="text-sm font-black text-gray-800">{selectedStatPlayer.avgUma}</span></div>
+                <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-2"><span className="block text-[9px] text-gray-500 font-bold mb-1">최대 연장</span><span className="text-sm font-black text-gray-800">{selectedStatPlayer.maxHonba}본장</span></div>
+                <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-2"><span className="block text-[9px] text-gray-500 font-bold mb-1">평균 방총점</span><span className="text-sm font-black text-orange-500">{Number(selectedStatPlayer.avgDealInScore).toLocaleString()}</span></div>
+              </div>
+
+              <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
+                <h3 className="text-sm font-bold text-gray-800 mb-3">모든 사용 역 현황</h3>
+                {Object.keys(selectedStatPlayer.yakus).length === 0 ? <p className="text-xs text-gray-400">기록된 역이 없습니다.</p> : (
+                  <div className="flex flex-wrap gap-1.5">
+                    {Object.entries(selectedStatPlayer.yakus).sort((a,b)=>b[1]-a[1]).map(([yaku, count]) => (
+                      <span key={yaku} className="bg-green-50 text-green-800 border border-green-200 px-2 py-1 rounded text-[10px] font-bold">{yaku} <span className="text-green-500 ml-0.5">{count}</span></span>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
+                <h3 className="text-sm font-bold text-gray-800 mb-3">화료 형태별 비율</h3>
+                <div className="grid grid-cols-3 gap-2 mb-4 bg-gray-50 p-2 rounded-lg text-center">
+                  <div><span className="block text-[10px] font-bold text-red-600 mb-0.5">리치 화료율</span><span className="text-sm font-black">{selectedStatPlayer.winCount>0?((selectedStatPlayer.riichiWinCount/selectedStatPlayer.winCount)*100).toFixed(0):0}%</span><span className="block text-[9px] text-gray-400">({selectedStatPlayer.riichiWinCount}회)</span></div>
+                  <div><span className="block text-[10px] font-bold text-gray-600 mb-0.5">다마 화료율</span><span className="text-sm font-black">{selectedStatPlayer.winCount>0?((selectedStatPlayer.damaWinCount/selectedStatPlayer.winCount)*100).toFixed(0):0}%</span><span className="block text-[9px] text-gray-400">({selectedStatPlayer.damaWinCount}회)</span></div>
+                  <div><span className="block text-[10px] font-bold text-blue-600 mb-0.5">후로 화료율</span><span className="text-sm font-black">{selectedStatPlayer.winCount>0?((selectedStatPlayer.furoWinCount/selectedStatPlayer.winCount)*100).toFixed(0):0}%</span><span className="block text-[9px] text-gray-400">({selectedStatPlayer.furoWinCount}회)</span></div>
+                </div>
+                <div className="space-y-2">
+                  {[
+                    { label: '멘젠 쯔모', count: selectedStatPlayer.menzenTsumo, color: 'bg-green-500' },
+                    { label: '멘젠 론', count: selectedStatPlayer.menzenRon, color: 'bg-[#2E7D32]' },
+                    { label: '비멘젠 쯔모', count: selectedStatPlayer.furoTsumo, color: 'bg-blue-400' },
+                    { label: '비멘젠 론', count: selectedStatPlayer.furoRon, color: 'bg-orange-400' }
+                  ].map(w => {
+                    const pct = selectedStatPlayer.winCount > 0 ? ((w.count / selectedStatPlayer.winCount) * 100).toFixed(1) : 0;
+                    return (
+                      <div key={w.label}>
+                        <div className="flex justify-between text-[10px] font-bold text-gray-700 mb-0.5"><span>{w.label}</span><span>{w.count}회 ({pct}%)</span></div>
+                        <div className="h-2 bg-gray-100 rounded-full overflow-hidden"><div className={`h-full ${w.color}`} style={{width: `${pct}%`}}></div></div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+
+              <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 mb-4">
+                <h3 className="text-sm font-bold text-gray-800 mb-3">대기 형태별 비율</h3>
+                <div className="space-y-2">
+                  {['양면', '샤보', '간짱', '변짱', '단기', '특수대기'].map(w => {
+                    const c = selectedStatPlayer.waitTypes[w] || 0;
+                    const pct = selectedStatPlayer.winCount > 0 ? ((c / selectedStatPlayer.winCount) * 100).toFixed(1) : 0;
+                    return (
+                      <div key={w}>
+                        <div className="flex justify-between text-[10px] font-bold text-gray-700 mb-0.5"><span>{w}</span><span>{c}회 ({pct}%)</span></div>
+                        <div className="h-2 bg-gray-100 rounded-full overflow-hidden"><div className="h-full bg-gray-600" style={{width: `${pct}%`}}></div></div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 모달들 (로그인, 마스터, 시즌, 새게임, 대국기록, 대국종료) */}
+      {isAuthModalOpen && (
+        <div className="absolute inset-0 bg-black bg-opacity-60 z-[70] flex items-center justify-center animate-in fade-in">
+          <div className="bg-white w-11/12 max-w-sm rounded-2xl shadow-2xl p-6 relative">
+            <button onClick={() => setIsAuthModalOpen(false)} className="absolute top-4 right-4 text-gray-400 hover:text-gray-600"><X size={20}/></button>
+            <div className="flex mb-6 border-b border-gray-200"><button onClick={()=>setAuthMode('login')} className={`flex-1 pb-2 font-bold ${authMode === 'login' ? 'text-[#2E7D32] border-b-2 border-[#2E7D32]' : 'text-gray-400'}`}>로그인</button><button onClick={()=>setAuthMode('signup')} className={`flex-1 pb-2 font-bold ${authMode === 'signup' ? 'text-[#2E7D32] border-b-2 border-[#2E7D32]' : 'text-gray-400'}`}>회원가입</button></div>
+            <div className="space-y-4">
+              <input type="text" placeholder="이름 (예: 하태원)" value={authName} onChange={e=>setAuthName(e.target.value)} className="w-full p-3 border border-gray-300 rounded-xl focus:outline-none focus:border-[#2E7D32] font-bold" />
+              <input type="password" inputMode="numeric" maxLength={4} placeholder="비밀번호 (숫자 4자리)" value={authPin} onChange={e=>setAuthPin(e.target.value)} className="w-full p-3 border border-gray-300 rounded-xl focus:outline-none focus:border-[#2E7D32] font-bold tracking-[0.5em] text-center" />
+              {authMode === 'signup' && (
+                <div className="p-3 bg-gray-50 border border-gray-200 rounded-xl"><span className="block text-xs font-bold text-gray-500 mb-2">요청 권한 선택</span><select value={authRoleReq} onChange={e=>setAuthRoleReq(e.target.value)} className="w-full bg-white p-2 rounded border border-gray-300 font-bold focus:outline-none"><option value="player">작사 (일반 유저)</option><option value="admin">관리자 (시즌 관리 등)</option></select><p className="text-[10px] text-gray-400 mt-2">* 관리자 권한은 마스터의 승인이 필요합니다.</p></div>
+              )}
+              <button onClick={authMode === 'login' ? handleLogin : handleSignup} className="w-full bg-[#2E7D32] text-white font-bold py-3.5 rounded-xl hover:bg-green-800 active:scale-[0.98]">{authMode === 'login' ? '로그인' : '가입하기'}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {isMasterModalOpen && (
+        <div className="absolute inset-0 bg-black bg-opacity-70 z-[80] flex flex-col justify-end animate-in fade-in">
+          <div className="bg-gray-100 w-full h-[85%] rounded-t-3xl shadow-2xl flex flex-col animate-in slide-in-from-bottom">
+            <div className="bg-yellow-600 rounded-t-3xl p-4 flex justify-between items-center text-white"><h2 className="text-lg font-bold flex items-center gap-2"><Shield size={18}/> 마스터 대시보드</h2><button onClick={() => setIsMasterModalOpen(false)} className="p-1 hover:bg-yellow-700 rounded-full"><X size={20}/></button></div>
+            <div className="flex-1 overflow-y-auto p-4 space-y-3">
+              <h3 className="font-bold text-gray-700 text-sm mb-2">가입된 유저 관리 ({allUsers.length}명)</h3>
+              {allUsers.filter(u => u.role !== 'master').map(user => (
+                <div key={user.name} className="bg-white p-3 rounded-xl shadow-sm border border-gray-200">
+                  <div className="flex justify-between items-center mb-2"><span className="font-bold text-lg text-gray-800">{user.name}</span><span className={`text-[10px] px-2 py-1 rounded font-bold ${user.role === 'admin' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600'}`}>{user.role === 'admin' ? '🛡️ 관리자' : '♟️ 작사'}</span></div>
+                  {user.pendingAdmin && (
+                    <div className="bg-yellow-50 border border-yellow-200 p-2 rounded-lg mb-2 flex items-center justify-between"><span className="text-xs font-bold text-yellow-700">⚠️ 관리자 권한 요청됨</span><div className="flex gap-1"><button onClick={() => handleApproveAdmin(user.name)} className="bg-green-500 text-white p-1 rounded hover:bg-green-600"><UserCheck size={16}/></button><button onClick={() => handleRejectAdmin(user.name)} className="bg-gray-400 text-white p-1 rounded hover:bg-gray-500"><X size={16}/></button></div></div>
+                  )}
+                  <div className="flex gap-2 mt-2">
+                    {user.role === 'admin' ? (<button onClick={() => handleDemotePlayer(user.name)} className="flex-1 py-2 bg-orange-100 text-orange-700 font-bold text-xs rounded-lg flex justify-center items-center gap-1 hover:bg-orange-200"><ShieldClose size={14}/> 권한 강등</button>) : (<button onClick={() => handlePromoteAdmin(user.name)} className="flex-1 py-2 bg-blue-50 text-blue-600 font-bold text-xs rounded-lg flex justify-center items-center gap-1 hover:bg-blue-100"><Shield size={14}/> 관리자 임명</button>)}
+                    <button onClick={() => handleRemoveUser(user.name)} className="flex-1 py-2 bg-red-50 text-red-600 font-bold text-xs rounded-lg flex justify-center items-center gap-1 hover:bg-red-100"><UserX size={14}/> 회원 삭제</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {isSeasonModalOpen && (
+        <div className="absolute inset-0 bg-black bg-opacity-60 z-[70] flex items-center justify-center animate-in fade-in">
+          <div className="bg-white w-11/12 max-w-md rounded-2xl shadow-2xl p-6 relative max-h-[80%] flex flex-col">
+            <button onClick={() => setIsSeasonModalOpen(false)} className="absolute top-4 right-4 text-gray-400 hover:text-gray-600"><X size={20}/></button><h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2"><CalendarPlus size={20}/> 시즌 설정</h2>
+            <div className="flex-1 overflow-y-auto mb-4 space-y-2 border border-gray-100 rounded-xl p-2 bg-gray-50">{seasons.map(s => (<div key={s.id} className="bg-white px-3 py-2 rounded-lg border border-gray-200 font-bold text-gray-700 shadow-sm text-sm">{s.name}</div>))}</div>
+            <div className="flex gap-2"><input type="text" placeholder="새 시즌 이름 (예: 2026 스프링)" value={newSeasonName} onChange={e=>setNewSeasonName(e.target.value)} className="flex-1 p-3 border border-gray-300 rounded-xl focus:outline-none focus:border-[#2E7D32] text-sm font-bold" /><button onClick={handleAddSeason} className="bg-[#2E7D32] text-white font-bold px-4 rounded-xl hover:bg-green-800">추가</button></div>
           </div>
         </div>
       )}
 
       {isNewGameModalOpen && (
         <div className="absolute inset-0 bg-black bg-opacity-60 z-50 flex flex-col justify-end animate-in fade-in">
-          <div className="bg-[#F5F5DC] w-full h-[85%] rounded-t-3xl shadow-2xl flex flex-col animate-in slide-in-from-bottom">
-            <div className="bg-[#2E7D32] rounded-t-3xl p-5 flex justify-between items-center text-white"><h2 className="text-xl font-bold">{activeTab} 대국 시작</h2><button onClick={() => setIsNewGameModalOpen(false)} className="p-1 hover:bg-green-700 rounded-full"><X size={24} /></button></div>
-            <div className="p-6 flex-1 overflow-y-auto">
-              <div className="flex items-center gap-2 mb-6"><Users className="text-[#2E7D32]" /><p className="text-gray-800 font-bold text-lg">초기 좌석을 입력해주세요</p></div>
-              <div className="space-y-4">
-                <div className="flex items-center gap-4 bg-white p-3 rounded-xl shadow-sm border border-gray-100"><div className="bg-[#2E7D32] text-white w-10 h-10 rounded-lg flex items-center justify-center font-bold text-lg shadow-inner">東</div><input type="text" value={playerE} onChange={e => setPlayerE(e.target.value)} placeholder="동가 이름" className="flex-1 text-lg font-bold bg-transparent focus:outline-none" /></div>
-                <div className="flex items-center gap-4 bg-white p-3 rounded-xl shadow-sm border border-gray-100"><div className="bg-orange-500 text-white w-10 h-10 rounded-lg flex items-center justify-center font-bold text-lg shadow-inner">南</div><input type="text" value={playerS} onChange={e => setPlayerS(e.target.value)} placeholder="남가 이름" className="flex-1 text-lg font-bold bg-transparent focus:outline-none" /></div>
-                <div className="flex items-center gap-4 bg-white p-3 rounded-xl shadow-sm border border-gray-100"><div className="bg-gray-500 text-white w-10 h-10 rounded-lg flex items-center justify-center font-bold text-lg shadow-inner">西</div><input type="text" value={playerW} onChange={e => setPlayerW(e.target.value)} placeholder="서가 이름" className="flex-1 text-lg font-bold bg-transparent focus:outline-none" /></div>
-                {activeTab === '4인' && (
-                  <div className="flex items-center gap-4 bg-white p-3 rounded-xl shadow-sm border border-gray-100"><div className="bg-blue-600 text-white w-10 h-10 rounded-lg flex items-center justify-center font-bold text-lg shadow-inner">北</div><input type="text" value={playerN} onChange={e => setPlayerN(e.target.value)} placeholder="북가 이름" className="flex-1 text-lg font-bold bg-transparent focus:outline-none" /></div>
-                )}
+          <div className="bg-[#F5F5DC] w-full h-[80%] rounded-t-3xl shadow-2xl flex flex-col animate-in slide-in-from-bottom">
+            <div className="bg-[#2E7D32] rounded-t-3xl p-4 flex justify-between items-center text-white"><h2 className="text-lg font-bold">{activeTab} 대국 시작</h2><button onClick={() => setIsNewGameModalOpen(false)} className="p-1 hover:bg-green-700 rounded-full"><X size={20} /></button></div>
+            <div className="p-5 flex-1 overflow-y-auto">
+              <div className="flex items-center gap-2 mb-4"><Users className="text-[#2E7D32]" /><p className="text-gray-800 font-bold text-sm">초기 좌석을 입력해주세요</p></div>
+              <div className="space-y-3">
+                <div className="flex items-center gap-3 bg-white p-2 rounded-xl shadow-sm border border-gray-100"><div className="bg-[#2E7D32] text-white w-8 h-8 rounded-lg flex items-center justify-center font-bold text-sm shadow-inner">동</div><input type="text" value={playerE} onChange={e => setPlayerE(e.target.value)} placeholder="동가 이름" className="flex-1 text-sm font-bold bg-transparent focus:outline-none" /></div>
+                <div className="flex items-center gap-3 bg-white p-2 rounded-xl shadow-sm border border-gray-100"><div className="bg-[#2E7D32] text-white w-8 h-8 rounded-lg flex items-center justify-center font-bold text-sm shadow-inner">남</div><input type="text" value={playerS} onChange={e => setPlayerS(e.target.value)} placeholder="남가 이름" className="flex-1 text-sm font-bold bg-transparent focus:outline-none" /></div>
+                <div className="flex items-center gap-3 bg-white p-2 rounded-xl shadow-sm border border-gray-100"><div className="bg-[#2E7D32] text-white w-8 h-8 rounded-lg flex items-center justify-center font-bold text-sm shadow-inner">서</div><input type="text" value={playerW} onChange={e => setPlayerW(e.target.value)} placeholder="서가 이름" className="flex-1 text-sm font-bold bg-transparent focus:outline-none" /></div>
+                {activeTab === '4인' && (<div className="flex items-center gap-3 bg-white p-2 rounded-xl shadow-sm border border-gray-100"><div className="bg-[#2E7D32] text-white w-8 h-8 rounded-lg flex items-center justify-center font-bold text-sm shadow-inner">북</div><input type="text" value={playerN} onChange={e => setPlayerN(e.target.value)} placeholder="북가 이름" className="flex-1 text-sm font-bold bg-transparent focus:outline-none" /></div>)}
               </div>
-              <button onClick={handleCreateNewGame} className="w-full bg-[#2E7D32] text-white font-bold text-lg py-4 rounded-xl mt-8 shadow-md hover:bg-green-800 active:scale-[0.98] transition-all">대국 시작하기</button>
+              <button onClick={handleCreateNewGame} className="w-full bg-[#2E7D32] text-white font-bold text-sm py-3.5 rounded-xl mt-6 shadow-md hover:bg-green-800 active:scale-[0.98] transition-all">대국 시작하기</button>
             </div>
           </div>
         </div>
@@ -513,83 +1025,61 @@ function App() {
       {isRoundModalOpen && (
         <div className="absolute inset-0 bg-[#F5F5DC] z-50 flex flex-col overflow-hidden animate-in slide-in-from-bottom">
           <div className="bg-[#2E7D32] text-white p-4 flex justify-between items-center pt-10 shadow-sm z-10"><button onClick={() => setIsRoundModalOpen(false)}><ChevronLeft size={28} /></button><h2 className="text-xl font-bold">{wind}{roundNum}국 기록</h2><button onClick={handleSaveRound} className="text-sm font-bold bg-green-700 px-3 py-1 rounded hover:bg-green-600">저장</button></div>
-          <div className="flex bg-white shadow-sm z-10"><button onClick={() => setRecordMode('화료')} className={`flex-1 py-4 font-bold border-b-4 transition-colors ${recordMode === '화료' ? 'border-[#2E7D32] text-[#2E7D32]' : 'border-transparent text-gray-400'}`}>화료 (Win)</button><button onClick={() => setRecordMode('유국')} className={`flex-1 py-4 font-bold border-b-4 transition-colors ${recordMode === '유국' ? 'border-gray-600 text-gray-700' : 'border-transparent text-gray-400'}`}>유국 (Draw)</button></div>
-          <div className="flex-1 overflow-y-auto p-5 space-y-10 pb-32">
-            
-            <section className="space-y-4">
-              <div className="flex items-center gap-4"><span className="text-gray-500 font-bold w-10">국풍</span><div className="flex gap-2">{['동', '남', '서', '북'].map(w => <button key={w} onClick={() => setWind(w)} className={`w-10 h-10 rounded-lg font-bold border-2 ${wind === w ? 'bg-[#2E7D32] border-[#2E7D32] text-white' : 'bg-white border-gray-200 text-gray-400'}`}>{w}</button>)}</div>
-                <div className="flex-1 flex items-center justify-end gap-3"><span className="font-bold text-[#2E7D32]">국 번호</span><div className="flex items-center bg-white rounded-lg border border-gray-200"><button onClick={() => setRoundNum(Math.max(1, roundNum - 1))} className="w-8 h-8 font-bold">-</button><span className="w-6 text-center font-bold text-green-700">{roundNum}</span><button onClick={() => setRoundNum(Math.min(4, roundNum + 1))} className="w-8 h-8 font-bold">+</button></div></div>
-              </div>
-              <div className="flex gap-4">
-                <div className="flex-1 flex justify-between p-3 bg-white rounded-xl border border-gray-100 items-center"><span className="font-bold text-green-700">본장</span><div className="flex items-center gap-2"><button onClick={() => setHonba(Math.max(0, honba - 1))} className="bg-gray-100 w-8 h-8 rounded font-bold">-</button><span className="font-bold text-lg w-4 text-center">{honba}</span><button onClick={() => setHonba(honba + 1)} className="bg-gray-100 w-8 h-8 rounded font-bold">+</button></div></div>
-                <div className="flex-1 flex justify-between p-3 bg-white rounded-xl border border-gray-100 items-center"><span className="font-bold text-orange-600">공탁</span><div className="flex items-center gap-2"><button onClick={() => setKyotaku(Math.max(0, kyotaku - 1))} className="bg-gray-100 w-8 h-8 rounded font-bold">-</button><span className="font-bold text-lg w-4 text-center">{kyotaku}</span><button onClick={() => setKyotaku(kyotaku + 1)} className="bg-gray-100 w-8 h-8 rounded font-bold">+</button></div></div>
-              </div>
+          <div className="flex bg-white shadow-sm z-10 text-sm"><button onClick={() => setRecordMode('화료')} className={`flex-1 py-4 font-bold border-b-4 transition-colors ${recordMode === '화료' ? 'border-[#2E7D32] text-[#2E7D32]' : 'border-transparent text-gray-400'}`}>화료 (Win)</button><button onClick={() => setRecordMode('유국')} className={`flex-1 py-4 font-bold border-b-4 transition-colors ${recordMode === '유국' ? 'border-gray-600 text-gray-700' : 'border-transparent text-gray-400'}`}>유국 (Draw)</button><button onClick={() => setRecordMode('촌보')} className={`flex-1 py-4 font-bold border-b-4 transition-colors ${recordMode === '촌보' ? 'border-red-500 text-red-600' : 'border-transparent text-gray-400'}`}>촌보 (Chombo)</button></div>
+          <div className="flex-1 overflow-y-auto p-4 space-y-8 pb-32">
+            <section className="space-y-3">
+              <div className="flex items-center gap-4"><span className="text-gray-500 font-bold w-8 text-sm">국풍</span><div className="flex gap-2">{['동', '남', '서', '북'].map(w => <button key={w} onClick={() => setWind(w)} className={`w-10 h-10 rounded-lg font-bold border-2 ${wind === w ? 'bg-[#2E7D32] border-[#2E7D32] text-white' : 'bg-white border-gray-200 text-gray-400'}`}>{w}</button>)}</div><div className="flex-1 flex items-center justify-end gap-2"><span className="font-bold text-[#2E7D32] text-sm">국</span><div className="flex items-center bg-white rounded-lg border border-gray-200"><button onClick={() => setRoundNum(Math.max(1, roundNum - 1))} className="w-8 h-8 font-bold">-</button><span className="w-6 text-center font-bold text-green-700">{roundNum}</span><button onClick={() => setRoundNum(Math.min(4, roundNum + 1))} className="w-8 h-8 font-bold">+</button></div></div></div>
+              <div className="flex gap-3"><div className="flex-1 flex justify-between p-2.5 bg-white rounded-xl border border-gray-100 items-center"><span className="font-bold text-green-700 text-sm">본장</span><div className="flex items-center gap-2"><button onClick={() => setHonba(Math.max(0, honba - 1))} className="bg-gray-100 w-8 h-8 rounded font-bold">-</button><span className="font-bold text-lg w-4 text-center">{honba}</span><button onClick={() => setHonba(honba + 1)} className="bg-gray-100 w-8 h-8 rounded font-bold">+</button></div></div><div className="flex-1 flex justify-between p-2.5 bg-white rounded-xl border border-gray-100 items-center"><span className="font-bold text-orange-600 text-sm">공탁</span><div className="flex items-center gap-2"><button onClick={() => setKyotaku(Math.max(0, kyotaku - 1))} className="bg-gray-100 w-8 h-8 rounded font-bold">-</button><span className="font-bold text-lg w-4 text-center">{kyotaku}</span><button onClick={() => setKyotaku(kyotaku + 1)} className="bg-gray-100 w-8 h-8 rounded font-bold">+</button></div></div></div>
             </section>
 
             {recordMode === '화료' ? (
               <>
-                <section className="space-y-4">
-                  <h3 className="font-bold text-lg text-gray-800 border-b pb-2">기본 정보</h3>
-                  <div className="flex gap-2"><button onClick={() => handleWinTypeChange('쯔모')} className={`flex-1 py-3 rounded-xl font-bold border-2 ${winType === '쯔모' ? 'border-[#2E7D32] bg-[#2E7D32] text-white' : 'bg-white text-gray-400 border-gray-100'}`}>쯔모</button><button onClick={() => handleWinTypeChange('론')} className={`flex-1 py-3 rounded-xl font-bold border-2 ${winType === '론' ? 'border-[#2E7D32] bg-[#2E7D32] text-white' : 'bg-white text-gray-400 border-gray-100'}`}>론</button></div>
-                  <div className="flex gap-2"><button onClick={() => setMenzen('멘젠')} className={`flex-1 py-3 rounded-xl font-bold border-2 ${menzen === '멘젠' ? 'border-[#2E7D32] bg-[#2E7D32] text-white' : 'bg-white text-gray-400 border-gray-100'}`}>멘젠</button><button onClick={() => setMenzen('비멘젠')} className={`flex-1 py-3 rounded-xl font-bold border-2 ${menzen === '비멘젠' ? 'border-[#2E7D32] bg-[#2E7D32] text-white' : 'bg-white text-gray-400 border-gray-100'}`}>비멘젠 (울음)</button></div>
+                <section className="space-y-3"><h3 className="font-bold text-base text-gray-800 border-b pb-1">기본 정보</h3><div className="flex gap-2"><button onClick={() => handleWinTypeChange('쯔모')} className={`flex-1 py-3 rounded-xl font-bold border-2 ${winType === '쯔모' ? 'border-[#2E7D32] bg-[#2E7D32] text-white' : 'bg-white text-gray-400 border-gray-100'}`}>쯔모</button><button onClick={() => handleWinTypeChange('론')} className={`flex-1 py-3 rounded-xl font-bold border-2 ${winType === '론' ? 'border-[#2E7D32] bg-[#2E7D32] text-white' : 'bg-white text-gray-400 border-gray-100'}`}>론</button></div><div className="flex gap-2"><button onClick={() => setMenzen('멘젠')} className={`flex-1 py-3 rounded-xl font-bold border-2 ${menzen === '멘젠' ? 'border-[#2E7D32] bg-[#2E7D32] text-white' : 'bg-white text-gray-400 border-gray-100'}`}>멘젠</button><button onClick={() => setMenzen('비멘젠')} className={`flex-1 py-3 rounded-xl font-bold border-2 ${menzen === '비멘젠' ? 'border-[#2E7D32] bg-[#2E7D32] text-white' : 'bg-white text-gray-400 border-gray-100'}`}>비멘젠 (울음)</button></div></section>
+                <section className="space-y-2"><div className="flex justify-between items-end"><h3 className="font-bold text-base text-gray-800">화료자 / 방총자</h3><p className="text-[10px] text-gray-400 font-medium">클릭: 화료 / 더블클릭: 방총</p></div><div className="grid grid-cols-2 gap-2">{players.map((player, index) => (<button key={index} onTouchStart={() => handlePlayerTouchStart(index)} onTouchEnd={handlePlayerTouchEnd} onDoubleClick={() => handlePlayerDoubleClick(index)} onClick={() => handlePlayerClick(index)} className={`relative h-14 rounded-xl font-bold text-base transition-all border-2 select-none ${winner === index ? 'bg-[#2E7D32] border-[#2E7D32] text-white shadow-inner' : loser === index ? 'bg-orange-500 border-orange-500 text-white shadow-inner' : 'bg-white border-gray-200 text-gray-800'}`}>{winner === index && <span className="absolute top-1 left-2 text-[9px] bg-white text-[#2E7D32] px-1 rounded font-black">화료</span>}{loser === index && <span className="absolute top-1 left-2 text-[9px] bg-white text-orange-600 px-1 rounded font-black">방총</span>}{player}</button>))}</div></section>
+                <section className="space-y-2"><h3 className="font-bold text-base text-gray-800">대기 형태</h3><div className="grid grid-cols-3 gap-2">{['양면', '샤보', '간짱', '변짱', '단기', '특수대기'].map(t => <button key={t} onClick={() => setWaitType(t)} className={`p-2.5 rounded-xl text-center text-sm font-bold border-2 ${waitType === t ? 'border-[#2E7D32] bg-[#2E7D32] text-white' : 'bg-white border-gray-100 text-gray-600'}`}>{t}</button>)}</div></section>
+                <section className="space-y-4"><div className="flex justify-between items-end border-b pb-1"><div className="flex items-center gap-2"><h3 className="font-bold text-base text-gray-800">역 선택</h3><span className="text-[10px] text-orange-500 bg-orange-50 px-1.5 py-0.5 rounded border border-orange-200">더블클릭: 후로 감소</span></div><span className="text-xs font-bold text-[#2E7D32]">선택됨: {selectedYaku.length}개</span></div>
+                  {Object.entries(yakuData).map(([category, yakus]) => (<div key={category} className="space-y-1.5"><h4 className="font-bold text-[#2E7D32] text-xs">{category}</h4><div className="grid grid-cols-3 gap-1.5">{yakus.map(yaku => { if (activeTab === '3인' && yaku === '삼색동순') return null; const isSelected = selectedYaku.includes(yaku); const isDecreased = furoDecreased.includes(yaku); const canDecrease = targetFuroYaku.includes(yaku); return (<button key={yaku} onClick={() => toggleYaku(yaku)} onTouchStart={() => canDecrease && handleYakuTouchStart(yaku)} onTouchEnd={() => canDecrease && handleYakuTouchEnd()} onDoubleClick={() => canDecrease && handleYakuDoubleClick(yaku)} className={`relative p-2 rounded-lg text-xs font-bold border transition-colors select-none ${isSelected ? 'bg-green-50 border-[#2E7D32] text-[#2E7D32] shadow-sm' : 'bg-white border-gray-200 text-gray-600'}`}>{isSelected && isDecreased && <span className="absolute -top-2 left-1 text-[8px] bg-orange-100 border border-orange-400 text-orange-600 px-1 rounded shadow-sm">후로 감소 (-1)</span>}{yaku}</button>);})}</div></div>))}
                 </section>
-                <section className="space-y-3"><div className="flex justify-between items-end"><h3 className="font-bold text-lg text-gray-800">화료자 / 방총자</h3><p className="text-[10px] text-gray-400 font-medium">클릭: 화료 / 더블클릭: 방총</p></div><div className="grid grid-cols-2 gap-3">
-                    {players.map((player, index) => (
-                      <button key={index} onTouchStart={() => handlePlayerTouchStart(index)} onTouchEnd={handlePlayerTouchEnd} onDoubleClick={() => handlePlayerDoubleClick(index)} onClick={() => handlePlayerClick(index)} className={`relative h-16 rounded-xl font-bold text-lg transition-all border-2 select-none ${winner === index ? 'bg-[#2E7D32] border-[#2E7D32] text-white shadow-inner' : loser === index ? 'bg-orange-500 border-orange-500 text-white shadow-inner' : 'bg-white border-gray-200 text-gray-800'}`}>
-                        {winner === index && <span className="absolute top-1 left-2 text-[10px] bg-white text-[#2E7D32] px-1.5 rounded font-black">화료</span>}
-                        {loser === index && <span className="absolute top-1 left-2 text-[10px] bg-white text-orange-600 px-1.5 rounded font-black">방총</span>}
-                        {player}
-                      </button>
-                    ))}
-                </div></section>
-                <section className="space-y-3"><h3 className="font-bold text-lg text-gray-800">대기 형태</h3><div className="grid grid-cols-2 gap-2">{['양면', '샤보', '간짱', '변짱', '단기', '특수대기'].map(t => <button key={t} onClick={() => setWaitType(t)} className={`p-3 rounded-xl text-center font-bold border-2 ${waitType === t ? 'border-[#2E7D32] bg-[#2E7D32] text-white' : 'bg-white border-gray-100 text-gray-600'}`}>{t}</button>)}</div></section>
-                <section className="space-y-6"><div className="flex justify-between items-end border-b pb-2"><div className="flex items-center gap-2"><h3 className="font-bold text-lg text-gray-800">역 선택</h3><span className="text-[10px] text-orange-500 bg-orange-50 px-1.5 py-0.5 rounded border border-orange-200">더블클릭: 후로 감소</span></div><span className="text-sm font-bold text-[#2E7D32]">선택됨: {selectedYaku.length}개</span></div>
-                  {Object.entries(yakuData).map(([category, yakus]) => (
-                    <div key={category} className="space-y-2"><h4 className="font-bold text-[#2E7D32] text-sm">{category}</h4><div className="grid grid-cols-2 gap-2">
-                        {yakus.map(yaku => {
-                          const isSelected = selectedYaku.includes(yaku); const isDecreased = furoDecreased.includes(yaku); const canDecrease = targetFuroYaku.includes(yaku);
-                          return (
-                            <button key={yaku} onClick={() => toggleYaku(yaku)} onTouchStart={() => canDecrease && handleYakuTouchStart(yaku)} onTouchEnd={() => canDecrease && handleYakuTouchEnd()} onDoubleClick={() => canDecrease && handleYakuDoubleClick(yaku)} className={`relative p-3 rounded-lg text-sm font-bold border transition-colors select-none ${isSelected ? 'bg-green-50 border-[#2E7D32] text-[#2E7D32] shadow-sm' : 'bg-white border-gray-200 text-gray-600'}`}>
-                              {isSelected && isDecreased && <span className="absolute -top-2 left-1 text-[9px] bg-orange-100 border border-orange-400 text-orange-600 px-1 rounded shadow-sm">후로 감소 (-1판)</span>}
-                              {yaku}
-                            </button>
-                          );
-                        })}
-                    </div></div>
-                  ))}
+                <section className="space-y-3"><h3 className="font-bold text-base text-gray-800 border-b pb-1">도라 / 부수 / 판수 (자동계산)</h3>
+                  <div className="grid grid-cols-2 gap-3 bg-white p-3 rounded-xl border border-gray-100"><div className="flex justify-between items-center"><span className="font-bold text-amber-600 text-sm">도라</span><div className="flex items-center gap-2"><button onClick={() => setDora(Math.max(0, dora - 1))} className="w-6 h-6 bg-gray-100 rounded font-bold">-</button><span className="w-4 text-center font-bold">{dora}</span><button onClick={() => setDora(dora + 1)} className="w-6 h-6 bg-gray-100 rounded font-bold">+</button></div></div><div className="flex justify-between items-center"><span className="font-bold text-amber-600 text-sm">아카</span><div className="flex items-center gap-2"><button onClick={() => setAka(Math.max(0, aka - 1))} className="w-6 h-6 bg-gray-100 rounded font-bold">-</button><span className="w-4 text-center font-bold">{aka}</span><button onClick={() => setAka(aka + 1)} className="w-6 h-6 bg-gray-100 rounded font-bold">+</button></div></div><div className="flex justify-between items-center"><span className="font-bold text-amber-600 text-sm">우라</span><div className="flex items-center gap-2"><button onClick={() => setUra(Math.max(0, ura - 1))} className="w-6 h-6 bg-gray-100 rounded font-bold">-</button><span className="w-4 text-center font-bold">{ura}</span><button onClick={() => setUra(ura + 1)} className="w-6 h-6 bg-gray-100 rounded font-bold">+</button></div></div>{activeTab === '3인' && (<div className="flex justify-between items-center"><span className="font-bold text-amber-600 text-sm">북</span><div className="flex items-center gap-2"><button onClick={() => setPei(Math.max(0, pei - 1))} className="w-6 h-6 bg-gray-100 rounded font-bold">-</button><span className="w-4 text-center font-bold">{pei}</span><button onClick={() => setPei(pei + 1)} className="w-6 h-6 bg-gray-100 rounded font-bold">+</button></div></div>)}</div>
+                  <div className="flex gap-3"><div className="flex-1 flex justify-between p-3 bg-white rounded-xl border border-gray-100 items-center"><span className="font-bold text-[#2E7D32] text-sm">부수</span><div className="flex items-center gap-2"><button onClick={() => setFu(Math.max(20, fu - 10))} className="bg-gray-100 w-8 h-8 rounded font-bold">-</button><span className="font-bold text-lg w-6 text-center">{fu}</span><button onClick={() => setFu(Math.min(110, fu + 10))} className="bg-gray-100 w-8 h-8 rounded font-bold">+</button></div></div><div className="flex-1 flex justify-between p-3 bg-green-50 rounded-xl border border-green-200 items-center relative"><span className="absolute -top-2 left-2 bg-green-200 text-green-800 text-[9px] px-1 rounded font-bold">자동계산</span><span className="font-bold text-[#2E7D32] text-sm">판수</span><div className="flex items-center gap-2"><button onClick={() => setHan(Math.max(1, han - 1))} className="bg-white w-8 h-8 rounded font-bold shadow-sm">-</button><span className="font-bold text-xl w-6 text-center text-[#2E7D32]">{han}</span><button onClick={() => setHan(han + 1)} className="bg-white w-8 h-8 rounded font-bold shadow-sm">+</button></div></div></div>
+                  <input type="number" inputMode="numeric" placeholder="화료 점수 직접 입력 (선택사항, 예: 8000)" value={score} onChange={(e) => setScore(e.target.value)} className="w-full p-3 rounded-xl border border-gray-200 bg-white font-bold text-sm focus:outline-none focus:border-[#2E7D32]" />
                 </section>
-                <section className="space-y-3"><h3 className="font-bold text-lg text-gray-800 border-b pb-2">도라 / 부수 / 판수</h3>
-                  <div className="grid grid-cols-2 gap-4 bg-white p-4 rounded-xl border border-gray-100">
-                    <div className="flex justify-between items-center"><span className="font-bold text-yellow-600">도라</span><div className="flex items-center gap-2"><button onClick={() => setDora(Math.max(0, dora - 1))} className="w-7 h-7 bg-gray-100 rounded font-bold">-</button><span className="w-4 text-center font-bold">{dora}</span><button onClick={() => setDora(dora + 1)} className="w-7 h-7 bg-gray-100 rounded font-bold">+</button></div></div>
-                    <div className="flex justify-between items-center"><span className="font-bold text-red-500">아카</span><div className="flex items-center gap-2"><button onClick={() => setAka(Math.max(0, aka - 1))} className="w-7 h-7 bg-gray-100 rounded font-bold">-</button><span className="w-4 text-center font-bold">{aka}</span><button onClick={() => setAka(aka + 1)} className="w-7 h-7 bg-gray-100 rounded font-bold">+</button></div></div>
-                    <div className="flex justify-between items-center"><span className="font-bold text-orange-400">우라</span><div className="flex items-center gap-2"><button onClick={() => setUra(Math.max(0, ura - 1))} className="w-7 h-7 bg-gray-100 rounded font-bold">-</button><span className="w-4 text-center font-bold">{ura}</span><button onClick={() => setUra(ura + 1)} className="w-7 h-7 bg-gray-100 rounded font-bold">+</button></div></div>
-                    <div className="flex justify-between items-center"><span className="font-bold text-blue-500">북</span><div className="flex items-center gap-2"><button onClick={() => setPei(Math.max(0, pei - 1))} className="w-7 h-7 bg-gray-100 rounded font-bold">-</button><span className="w-4 text-center font-bold">{pei}</span><button onClick={() => setPei(pei + 1)} className="w-7 h-7 bg-gray-100 rounded font-bold">+</button></div></div>
-                  </div>
-                  <div className="flex gap-4">
-                    <div className="flex-1 flex justify-between p-3 bg-white rounded-xl border border-gray-100 items-center"><span className="font-bold text-[#2E7D32]">부수</span><div className="flex items-center gap-2"><button onClick={() => setFu(Math.max(20, fu - 10))} className="bg-gray-100 w-8 h-8 rounded font-bold">-</button><span className="font-bold text-lg w-6 text-center">{fu}</span><button onClick={() => setFu(Math.min(110, fu + 10))} className="bg-gray-100 w-8 h-8 rounded font-bold">+</button></div></div>
-                    <div className="flex-1 flex justify-between p-3 bg-white rounded-xl border border-gray-100 items-center"><span className="font-bold text-[#2E7D32]">판수</span><div className="flex items-center gap-2"><button onClick={() => setHan(Math.max(1, han - 1))} className="bg-gray-100 w-8 h-8 rounded font-bold">-</button><span className="font-bold text-lg w-4 text-center">{han}</span><button onClick={() => setHan(han + 1)} className="bg-gray-100 w-8 h-8 rounded font-bold">+</button></div></div>
-                  </div>
-                </section>
+              </>
+            ) : recordMode === '유국' ? (
+              <>
+                <section className="space-y-3"><div className="flex justify-between items-end border-b pb-1"><h3 className="font-bold text-base text-gray-800">텐파이 플레이어</h3><p className="text-[10px] text-gray-400">선택 안하면 전원 노텐</p></div><div className="grid grid-cols-2 gap-2">{players.map((player, index) => <button key={`tenpai-${index}`} onClick={() => toggleTenpai(index)} disabled={abortiveType !== null} className={`h-14 rounded-xl font-bold text-base transition-all border-2 select-none ${tenpaiPlayers.includes(index) ? 'bg-[#2E7D32] border-[#2E7D32] text-white shadow-inner' : 'bg-white border-gray-200 text-gray-800 disabled:opacity-50'}`}>{player}</button>)}</div></section>
+                <section className="space-y-3"><div className="flex justify-between items-end border-b pb-1"><h3 className="font-bold text-base text-gray-800">유국만관 발생</h3></div><div className="grid grid-cols-2 gap-2">{players.map((player, index) => <button key={`nagashi-${index}`} onClick={() => toggleNagashi(index)} disabled={abortiveType !== null} className={`h-12 rounded-xl font-bold text-sm transition-all border-2 select-none ${nagashiMangan.includes(index) ? 'bg-red-500 border-red-500 text-white shadow-inner' : 'bg-white border-gray-200 text-gray-600 disabled:opacity-50'}`}>{player}</button>)}</div></section>
+                <section className="space-y-3"><div className="flex justify-between items-end border-b pb-1"><h3 className="font-bold text-base text-gray-800">도중유국 (선택)</h3></div><div className="grid grid-cols-2 gap-2">{abortiveDraws.map(type => <button key={type} onClick={() => toggleAbortive(type)} className={`p-3 rounded-xl text-center font-bold text-sm border-2 transition-colors ${abortiveType === type ? 'bg-gray-700 border-gray-700 text-white shadow-inner' : 'bg-white border-gray-200 text-gray-600 hover:border-gray-300'}`}>{type}</button>)}</div></section>
               </>
             ) : (
               <>
-                <section className="space-y-3"><div className="flex justify-between items-end border-b pb-2"><h3 className="font-bold text-lg text-gray-800">텐파이 플레이어</h3><p className="text-[10px] text-gray-400">선택하지 않으면 전원 노텐</p></div><div className="grid grid-cols-2 gap-3">
-                  {players.map((player, index) => <button key={`tenpai-${index}`} onClick={() => toggleTenpai(index)} disabled={abortiveType !== null} className={`h-16 rounded-xl font-bold text-lg transition-all border-2 select-none ${tenpaiPlayers.includes(index) ? 'bg-[#2E7D32] border-[#2E7D32] text-white shadow-inner' : 'bg-white border-gray-200 text-gray-800 hover:border-gray-300 disabled:opacity-50 disabled:bg-gray-100'}`}>{player}</button>)}
-                </div></section>
-                <section className="space-y-3"><div className="flex justify-between items-end border-b pb-2"><h3 className="font-bold text-lg text-gray-800">유국만관 여부 (선택)</h3></div><div className="grid grid-cols-2 gap-3">
-                  {players.map((player, index) => <button key={`nagashi-${index}`} onClick={() => toggleNagashi(index)} disabled={abortiveType !== null} className={`h-12 rounded-xl font-bold transition-all border-2 select-none ${nagashiMangan.includes(index) ? 'bg-orange-500 border-orange-500 text-white shadow-inner' : 'bg-white border-gray-200 text-gray-600 hover:border-gray-300 disabled:opacity-50 disabled:bg-gray-100'}`}>{player}</button>)}
-                </div></section>
-                <section className="space-y-3"><div className="flex justify-between items-end border-b pb-2"><h3 className="font-bold text-lg text-gray-800">도중유국 종류 (선택)</h3></div><div className="grid grid-cols-2 gap-2">
-                  {abortiveDraws.map(type => <button key={type} onClick={() => toggleAbortive(type)} className={`p-4 rounded-xl text-center font-bold border-2 transition-colors ${abortiveType === type ? 'bg-gray-700 border-gray-700 text-white shadow-inner' : 'bg-white border-gray-200 text-gray-600 hover:border-gray-300'}`}>{type}</button>)}
-                </div></section>
+                <section className="space-y-3"><div className="flex justify-between items-end border-b pb-1"><h3 className="font-bold text-base text-red-600">촌보 발생자 선택</h3></div><div className="grid grid-cols-2 gap-2">{players.map((player, index) => <button key={`chombo-${index}`} onClick={() => setChomboPlayer(index)} className={`h-14 rounded-xl font-bold text-base transition-all border-2 select-none ${chomboPlayer === index ? 'bg-red-500 border-red-500 text-white shadow-inner' : 'bg-white border-gray-200 text-gray-800'}`}>{player}</button>)}</div></section>
+                <section className="space-y-3"><div className="flex justify-between items-end border-b pb-1"><h3 className="font-bold text-base text-gray-800">처리 방식</h3></div><div className="flex flex-col gap-2">{chomboTypes.map(type => <button key={type} onClick={() => setChomboType(type)} className={`p-4 rounded-xl text-left font-bold text-sm border-2 transition-colors ${chomboType === type ? 'bg-gray-100 border-gray-400 text-gray-800' : 'bg-white border-gray-100 text-gray-500'}`}>{type}</button>)}</div></section>
               </>
             )}
+            <section className="pt-4 border-t border-gray-200"><textarea placeholder="해당 국에 대한 메모나 코멘트를 자유롭게 적어주세요. (선택)" value={roundComment} onChange={(e) => setRoundComment(e.target.value)} className="w-full p-3 rounded-xl border border-gray-200 bg-white text-sm focus:outline-none focus:border-[#2E7D32] h-20 resize-none"></textarea></section>
           </div>
-          <div className="p-4 bg-white border-t border-gray-200 shadow-[0_-10px_15px_-3px_rgba(0,0,0,0.05)] z-10"><button onClick={handleSaveRound} className={`w-full text-white font-bold py-4 rounded-xl flex items-center justify-center gap-2 active:scale-[0.98] transition-all ${recordMode === '화료' ? 'bg-[#2E7D32] hover:bg-green-800' : 'bg-gray-700 hover:bg-gray-800'}`}><Check size={20} strokeWidth={3} /> {recordMode === '화료' ? '화료 기록 저장' : '유국 기록 저장'}</button></div>
+          <div className="p-4 bg-white border-t border-gray-200 shadow-[0_-10px_15px_-3px_rgba(0,0,0,0.05)] z-10"><button onClick={handleSaveRound} className={`w-full text-white font-bold py-4 rounded-xl flex items-center justify-center gap-2 active:scale-[0.98] transition-all ${recordMode === '화료' ? 'bg-[#2E7D32] hover:bg-green-800' : recordMode === '유국' ? 'bg-gray-700 hover:bg-gray-800' : 'bg-red-600 hover:bg-red-700'}`}><Check size={20} strokeWidth={3} /> {recordMode === '화료' ? '화료 기록 저장' : recordMode === '유국' ? '유국 기록 저장' : '촌보 기록 저장'}</button></div>
         </div>
       )}
 
-      {/* 하단 네비게이션 */}
+      {/* 대국 종료 폼 */}
+      {isEndGameModalOpen && (
+        <div className="absolute inset-0 bg-black bg-opacity-60 z-[60] flex flex-col justify-end animate-in fade-in">
+          <div className="bg-[#F5F5DC] w-full h-[70%] rounded-t-3xl shadow-2xl flex flex-col animate-in slide-in-from-bottom">
+            <div className="bg-[#1e293b] rounded-t-3xl p-4 flex justify-between items-center text-white"><h2 className="text-lg font-bold flex items-center gap-2"><Flag size={18} /> 대국 결과 입력</h2><button onClick={() => setIsEndGameModalOpen(false)} className="p-1 hover:bg-gray-700 rounded-full"><X size={20} /></button></div>
+            <div className="p-4 flex-1 overflow-y-auto space-y-4">
+              <div className="bg-yellow-50 border border-yellow-200 text-yellow-800 p-3 rounded-lg text-xs font-bold shadow-sm">⚠️ 소점 총합은 {players.length === 4 ? '100,000' : '105,000'}점이어야 합니다.<br/>현재 입력 합계: <span className="text-red-500">{finalScores.reduce((sum, f) => sum + (parseInt(f.score) || 0), 0).toLocaleString()}점</span></div>
+              <div className="space-y-2">{players.map((p, i) => (<div key={i} className="flex gap-3 items-center bg-white p-3 rounded-xl border border-gray-200 shadow-sm"><span className="w-14 font-bold truncate text-gray-800 text-sm">{p}</span><input type="number" inputMode="numeric" placeholder="소점" value={finalScores[i]?.score ?? ''} onChange={(e) => updateFinalScore(i, e.target.value)} className="flex-1 p-2 bg-gray-50 border border-gray-200 rounded-lg text-right font-bold text-sm focus:outline-none focus:border-[#2E7D32]" /></div>))}</div>
+              <p className="text-center text-gray-400 text-[10px] font-bold mt-2">※ PT(우마/오카)는 자동 계산됩니다.</p>
+            </div>
+            <div className="p-4 bg-white border-t border-gray-200 shadow-md"><button onClick={handleConfirmEndGame} className="w-full bg-[#1e293b] text-white font-bold text-sm py-3.5 rounded-xl hover:bg-gray-800 active:scale-[0.98] transition-all">결과 저장 및 대국 종료</button></div>
+          </div>
+        </div>
+      )}
+
+      {/* 네비게이션 바 */}
       <nav className="fixed bottom-0 w-full bg-white border-t border-gray-200 flex justify-around p-2 pb-6 z-10">
         <button className={`flex flex-col items-center p-2 transition-colors ${activeNav === '기록' ? 'text-[#2E7D32]' : 'text-gray-400'}`} onClick={() => {setActiveNav('기록'); setSelectedGameId(null);}}><List size={24} /><span className="text-[10px] mt-1 font-bold">대국 기록</span></button>
         <button className={`flex flex-col items-center p-2 transition-colors ${activeNav === '통계' ? 'text-[#2E7D32]' : 'text-gray-400'}`} onClick={() => setActiveNav('통계')}><BarChart2 size={24} /><span className="text-[10px] mt-1 font-bold">통계</span></button>
