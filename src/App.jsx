@@ -865,7 +865,7 @@ function App() {
               <div className="bg-white p-3 rounded-xl shadow-sm border border-gray-200 flex items-center justify-between">
                 <span className="text-xs font-bold text-gray-500 flex items-center gap-1"><BarChart2 size={14}/> 정렬 기준</span>
                 <select value={rankingSort} onChange={e=>setRankingSort(e.target.value)} className="bg-gray-50 border border-gray-200 text-gray-800 text-sm font-bold rounded-lg px-2 py-1.5 focus:outline-none">
-                  <option value="totalUma">누적 우마 (PT)</option>
+                  <option value="totalUma">누적 우마</option>
                   <option value="avgUma">평균 우마</option>
                   <option value="maxScore">최고 점수</option>
                   <option value="firstRate">1위율 (%)</option>
