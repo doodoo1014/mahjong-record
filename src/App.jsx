@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
-import { Gamepad2, Plus, List, BarChart2, Trophy, ChevronLeft, Check, Trash2, ShieldAlert, Users, X, Flag, Edit, Lock, Unlock, Search, CalendarPlus, Shield, UserCheck, ShieldClose, UserX, MessageSquare, AlertOctagon, PieChart, BarChart } from 'lucide-react';
+import { Gamepad2, Plus, List, BarChart2, Trophy, ChevronLeft, Check, Trash2, ShieldAlert, Users, X, Flag, Edit, Lock, Unlock, Search, CalendarPlus, Shield, UserCheck, ShieldClose, UserX, MessageSquare, AlertOctagon, PieChart, BarChart, Bell } from 'lucide-react';
 import { db } from './firebase'; 
 import { collection, doc, setDoc, getDoc, updateDoc, deleteDoc, onSnapshot, query, orderBy } from 'firebase/firestore'; 
 
@@ -33,6 +33,7 @@ function App() {
   const [authName, setAuthName] = useState(''); const [authPin, setAuthPin] = useState(''); const [authRoleReq, setAuthRoleReq] = useState('player'); 
   const [isMasterModalOpen, setIsMasterModalOpen] = useState(false);
   const [allUsers, setAllUsers] = useState([]);
+  const [isUpdateModalOpen, setIsUpdateModalOpen] = useState(false); // 💡 업데이트 내역 모달 상태
 
   const canWrite = !!currentUser; 
   const isAdmin = currentUser?.role === 'admin' || currentUser?.role === 'master';
@@ -447,6 +448,7 @@ function App() {
                {activeNav === '기록' && '리치마작 기록'}
                {activeNav === '통계' && '마작 통계'}
                {activeNav === '랭킹' && '플레이어 랭킹'}
+               {activeNav === '업데이트' && '업데이트 내역'}
              </h1>
           )}
           {selectedGameId === null && (
@@ -804,6 +806,23 @@ function App() {
             </div>
           </div>
         )}
+
+        {/* ========================================= */}
+        {/* 화면 4: 📢 업데이트 내역 페이지 */}
+        {/* ========================================= */}
+        {activeNav === '업데이트' && (
+          <div className="flex-1 flex flex-col p-4 space-y-4">
+            <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-200 animate-in fade-in slide-in-from-bottom-2">
+              <div className="flex items-center justify-between mb-4 border-b border-gray-100 pb-3">
+                <span className="font-black text-[#2E7D32] text-xl">v1.0.0</span>
+                <span className="text-sm font-bold text-gray-400">2026/03/05</span>
+              </div>
+              <ul className="text-sm font-bold text-gray-700 space-y-2 pl-2 list-disc list-inside">
+                <li>리치 마작 기록 및 통계 페이지 오픈</li>
+              </ul>
+            </div>
+          </div>
+        )}
       </main>
 
       {/* 💡 세부 분포 모달 (역, 대기, 화료형태 클릭 시) */}
@@ -1084,6 +1103,7 @@ function App() {
         <button className={`flex flex-col items-center p-2 transition-colors ${activeNav === '기록' ? 'text-[#2E7D32]' : 'text-gray-400'}`} onClick={() => {setActiveNav('기록'); setSelectedGameId(null);}}><List size={24} /><span className="text-[10px] mt-1 font-bold">대국 기록</span></button>
         <button className={`flex flex-col items-center p-2 transition-colors ${activeNav === '통계' ? 'text-[#2E7D32]' : 'text-gray-400'}`} onClick={() => setActiveNav('통계')}><BarChart2 size={24} /><span className="text-[10px] mt-1 font-bold">통계</span></button>
         <button className={`flex flex-col items-center p-2 transition-colors ${activeNav === '랭킹' ? 'text-[#2E7D32]' : 'text-gray-400'}`} onClick={() => setActiveNav('랭킹')}><Trophy size={24} /><span className="text-[10px] mt-1 font-bold">랭킹</span></button>
+        <button className={`flex flex-col items-center p-2 transition-colors ${activeNav === '업데이트' ? 'text-[#2E7D32]' : 'text-gray-400'}`} onClick={() => {setActiveNav('업데이트'); setSelectedGameId(null);}}><Bell size={24} /><span className="text-[10px] mt-1 font-bold">업데이트</span></button>
       </nav>
     </div>
   );
