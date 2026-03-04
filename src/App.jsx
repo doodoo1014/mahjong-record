@@ -4,19 +4,19 @@ import { db } from './firebase';
 import { collection, doc, setDoc, getDoc, updateDoc, deleteDoc, onSnapshot, query, orderBy } from 'firebase/firestore'; 
 
 const yakuData = {
-  '1판 역': ['리치', '일발', '멘젠쯔모', '탕야오', '핑후', '이페코', '해저로월', '하저로어', '영상개화', '창깡', '백', '발', '중', '자풍패', '장풍패'],
-  '2판 역': ['더블리치', '찬타', '삼색동순', '일기통관', '대대화', '삼암각', '삼색동각', '산깡즈', '소삼원', '혼로두'],
+  '1판 역': ['리치', '일발', '멘젠쯔모', '탕야오', '핑후', '이페코', '백', '발', '중', '자풍패', '장풍패', '해저로월', '하저로어', '영상개화', '창깡'],
+  '2판 역': ['더블리치', '치또이쯔', '일기통관', '삼색동순', '삼색동각', '또이또이', '산안커', '찬타', '소삼원', '혼노두', '산깡쯔'],
   '3판 역': ['혼일색', '준찬타', '량페코'],
   '6판 역': ['청일색'],
-  '역만': ['국사무쌍', '사암각', '대삼원', '자일색', '녹일색', '청노두', '구련보등', '사깡즈', '소사희', '대사희', '천화', '지화']
-};
-const targetFuroYaku = ['일기통관', '삼색동순', '찬타', '준찬타', '혼일색'];
+  '역만': ['천화', '지화', '인화', '스안커', '국사무쌍', '대삼원', '구련보등', '소사희', '자일색', '녹일색', '청노두', '스깡쯔', '대차륜', '대죽림', '대수린', '석상삼년'],
+  '더블역만': ['대사희', '스안커 단기', '국사무쌍 13면 대기', '순정구련보등', '홍공작', '대칠성']
+}
+const targetFuroYaku = ['일기통관', '삼색동순', '찬타', '준찬타', '혼일색', '청일색'];
 const abortiveDraws = ['구종구패', '사풍연타', '사깡유국', '사가리치'];
-const chomboTypes = ['만관 지불', '무효국 (벌점 없음)', '기타 (코멘트 참조)'];
 const ADMIN_PIN = '0000';
 
 function App() {
-  const [activeTab, setActiveTab] = useState('4인');
+  const [activeTab, setActiveTab] = useState('전체');
   const [activeNav, setActiveNav] = useState('기록');
   
   const [games, setGames] = useState([]); 
@@ -33,7 +33,6 @@ function App() {
   const [authName, setAuthName] = useState(''); const [authPin, setAuthPin] = useState(''); const [authRoleReq, setAuthRoleReq] = useState('player'); 
   const [isMasterModalOpen, setIsMasterModalOpen] = useState(false);
   const [allUsers, setAllUsers] = useState([]);
-  const [isUpdateModalOpen, setIsUpdateModalOpen] = useState(false); // 💡 업데이트 내역 모달 상태
 
   const canWrite = !!currentUser; 
   const isAdmin = currentUser?.role === 'admin' || currentUser?.role === 'master';
@@ -111,7 +110,7 @@ function App() {
   };
 
   const displayedGames = games.filter(g => {
-    if (g.type !== activeTab) return false;
+    if (activeTab !== '전체' && g.type !== activeTab) return false;
     if (selectedSeason !== 'all' && g.seasonId !== selectedSeason) return false;
     if (searchQuery) {
       const matchDate = g.date.includes(searchQuery);
@@ -145,23 +144,23 @@ function App() {
   const winRecords = records.filter(r => r.type === '화료');
   const tsumoCount = winRecords.filter(r => r.winType === '쯔모').length;
   const ronCount = winRecords.filter(r => r.winType === '론').length;
-  const avgHan = winRecords.length > 0 ? (winRecords.reduce((acc, r) => acc + r.han, 0) / winRecords.length).toFixed(1) : 0;
-
+  const drawCount = records.filter(r => r.type === '유국').length; // 💡 평균판수 대신 유국 수 계산
   useEffect(() => {
     if (recordMode !== '화료') return;
     let calcHan = 0;
     selectedYaku.forEach(y => {
-      if (yakuData['1판 역'].includes(y)) calcHan += 1;
-      else if (yakuData['2판 역'].includes(y)) calcHan += 2;
-      else if (yakuData['3판 역'].includes(y)) calcHan += 3;
-      else if (yakuData['6판 역'].includes(y)) calcHan += 6;
-      else if (yakuData['역만'].includes(y)) calcHan += 13; 
+      if (yakuData['1판']?.includes(y)) calcHan += 1;
+      else if (yakuData['2판']?.includes(y)) calcHan += 2;
+      else if (yakuData['3판']?.includes(y)) calcHan += 3;
+      else if (yakuData['6판']?.includes(y)) calcHan += 6;
+      else if (yakuData['역만']?.includes(y)) calcHan += 13; 
+      else if (yakuData['더블역만']?.includes(y)) calcHan += 26;
     });
     calcHan -= furoDecreased.length;
     calcHan += dora + aka + ura;
-    if (activeTab === '3인') calcHan += pei;
+    if (activeTab === '3인' || currentGame?.type === '3인') calcHan += pei;
     setHan(calcHan > 0 ? calcHan : 1);
-  }, [selectedYaku, furoDecreased, dora, aka, ura, pei, activeTab, recordMode]);
+  }, [selectedYaku, furoDecreased, dora, aka, ura, pei, activeTab, currentGame, recordMode]);
 
   const playerTimerRef = useRef(null);
   const handlePlayerTouchStart = (index) => { playerTimerRef.current = setTimeout(() => { if (winType === '론') { setLoser(index); if (winner === index) setWinner(null); } }, 500); };
@@ -180,13 +179,14 @@ function App() {
   const toggleAbortive = (type) => { setAbortiveType(prev => prev === type ? null : type); if (abortiveType !== type) setTenpaiPlayers([]); };
 
   const handleCreateNewGame = async () => {
-    if (activeTab === '4인' && (!playerE || !playerS || !playerW || !playerN)) return alert("모든 플레이어 이름을 입력해주세요!");
-    if (activeTab === '3인' && (!playerE || !playerS || !playerW)) return alert("모든 플레이어 이름을 입력해주세요!");
+    const gameType = activeTab === '전체' ? '4인' : activeTab; // 전체 탭에서 생성 시 4인 기본
+    if (gameType === '4인' && (!playerE || !playerS || !playerW || !playerN)) return alert("모든 플레이어 이름을 입력해주세요!");
+    if (gameType === '3인' && (!playerE || !playerS || !playerW)) return alert("모든 플레이어 이름을 입력해주세요!");
     const currentSeasonId = selectedSeason === 'all' ? seasons[seasons.length - 1].id : selectedSeason;
     const newGame = { 
       id: Date.now(), seasonId: currentSeasonId,
       date: new Date().toLocaleDateString('ko-KR', { year: 'numeric', month: '2-digit', day: '2-digit' }).replace(/\./g, '.').slice(0, -1), 
-      type: activeTab, players: activeTab === '4인' ? [playerE, playerS, playerW, playerN] : [playerE, playerS, playerW], 
+      type: gameType, players: gameType === '4인' ? [playerE, playerS, playerW, playerN] : [playerE, playerS, playerW], 
       rounds: [], status: '진행중', finalResults: null 
     };
     await setDoc(doc(db, 'games', newGame.id.toString()), newGame);
@@ -244,7 +244,7 @@ function App() {
 
   const hasYakuman = (game) => {
     if(!game.rounds) return false;
-    return game.rounds.some(r => r.type === '화료' && (r.han >= 13 || r.selectedYaku?.some(y => yakuData['역만'].includes(y))));
+    return game.rounds.some(r => r.type === '화료' && (r.han >= 13 || r.selectedYaku?.some(y => yakuData['역만']?.includes(y) || yakuData['더블역만']?.includes(y))));
   };
 
 
@@ -257,20 +257,8 @@ function App() {
   const [rankingSort, setRankingSort] = useState('totalUma');
   const [selectedStatPlayerName, setSelectedStatPlayerName] = useState(null); 
   
-  // 💡 세부 분포 모달을 위한 상태 추가
+  // 💡 세부 분포 모달 상태
   const [breakdownData, setBreakdownData] = useState(null); 
-
-  // 💡 모달 데이터 생성 헬퍼 함수
-  const openBreakdown = (title, type, key) => {
-    const data = playerStatsList.map(p => {
-      let count = 0;
-      if (type === 'yaku') count = p.yakus[key] || 0;
-      else if (type === 'wait') count = p.waitTypes[key] || 0;
-      else if (type === 'winType') count = p[key] || 0;
-      return { name: p.name, count };
-    }).filter(p => p.count > 0).sort((a, b) => b.count - a.count);
-    setBreakdownData({ title, data });
-  };
 
   const getFilteredGamesForStats = (typeTab) => {
     return games.filter(g => {
@@ -293,8 +281,8 @@ function App() {
             ranks: [0,0,0,0], tobiCount: 0, roundsPlayed: 0, winCount: 0, dealInCount: 0, 
             tsumoCount: 0, ronCount: 0, riichiWinCount: 0, damaWinCount: 0, furoWinCount: 0,
             totalHan: 0, maxHonba: 0, waitTypes: {}, yakus: {},
-            totalWinScore: 0, winScoreCount: 0, // 💡 평균 타점 계산용
-            totalDealInScore: 0, dealInScoreCount: 0, // 💡 평균 방총점 계산용
+            totalWinScore: 0, winScoreCount: 0, 
+            totalDealInScore: 0, dealInScoreCount: 0, 
             chomboCount: 0, yakumanCount: 0,
             menzenTsumo: 0, menzenRon: 0, furoTsumo: 0, furoRon: 0
           };
@@ -322,12 +310,12 @@ function App() {
             else if (isRiichi) winnerStat.riichiWinCount += 1;
             else winnerStat.damaWinCount += 1;
 
-            if (round.han >= 13 || round.selectedYaku?.some(y => yakuData['역만'].includes(y))) winnerStat.yakumanCount += 1;
+            if (round.han >= 13 || round.selectedYaku?.some(y => yakuData['역만']?.includes(y) || yakuData['더블역만']?.includes(y))) winnerStat.yakumanCount += 1;
 
             winnerStat.waitTypes[round.waitType] = (winnerStat.waitTypes[round.waitType] || 0) + 1;
             round.selectedYaku?.forEach(yaku => { winnerStat.yakus[yaku] = (winnerStat.yakus[yaku] || 0) + 1; });
             
-            // 💡 화료 점수가 입력된 경우에만 합산 (평균 타점용)
+            // 평균 타점용 합산
             if (round.score && Number(round.score) > 0) {
               winnerStat.totalWinScore += Number(round.score);
               winnerStat.winScoreCount += 1;
@@ -335,7 +323,7 @@ function App() {
           }
           if(round.winType === '론' && round.loser && stats[round.loser]) {
             stats[round.loser].dealInCount += 1;
-            // 💡 방총 시, 화료 점수가 입력된 경우에만 합산 (평균 방총점용)
+            // 평균 방총점용 합산
             if (round.score && Number(round.score) > 0) {
               stats[round.loser].totalDealInScore += Number(round.score);
               stats[round.loser].dealInScoreCount += 1;
@@ -355,10 +343,11 @@ function App() {
         winRate: s.roundsPlayed > 0 ? ((s.winCount / s.roundsPlayed) * 100).toFixed(1) : 0,
         dealInRate: s.roundsPlayed > 0 ? ((s.dealInCount / s.roundsPlayed) * 100).toFixed(1) : 0,
         avgHan: s.winCount > 0 ? (s.totalHan / s.winCount).toFixed(1) : 0,
-        avgWinScore: s.winScoreCount > 0 ? Math.floor(s.totalWinScore / s.winScoreCount) : 0, // 💡 실제 평균 타점
+        avgWinScore: s.winScoreCount > 0 ? Math.floor(s.totalWinScore / s.winScoreCount) : 0,
         avgUma: s.gamesPlayed > 0 ? (s.totalUma / s.gamesPlayed).toFixed(1) : 0,
         avgScore: s.gamesPlayed > 0 ? Math.floor(s.totalScore / s.gamesPlayed) : 0,
-        avgDealInScore: s.dealInScoreCount > 0 ? Math.floor(s.totalDealInScore / s.dealInScoreCount) : 0, // 💡 0점 입력건 제외된 방총점firstRate: s.gamesPlayed > 0 ? ((s.ranks[0] / s.gamesPlayed) * 100).toFixed(1) : 0,
+        avgDealInScore: s.dealInScoreCount > 0 ? Math.floor(s.totalDealInScore / s.dealInScoreCount) : 0,
+        firstRate: s.gamesPlayed > 0 ? ((s.ranks[0] / s.gamesPlayed) * 100).toFixed(1) : 0,
         rentaiRate: s.gamesPlayed > 0 ? ((rentaiCount / s.gamesPlayed) * 100).toFixed(1) : 0,
         tobiRate: s.gamesPlayed > 0 ? ((s.tobiCount / s.gamesPlayed) * 100).toFixed(1) : 0,
         avgRank: avgRank,
@@ -370,6 +359,18 @@ function App() {
   const statsGames = getFilteredGamesForStats(statsMainTab);
   const playerStatsList = useMemo(() => generatePlayerStats(statsGames).sort((a,b) => b.winCount - a.winCount), [statsGames]);
   const selectedStatPlayer = playerStatsList.find(p => p.name === selectedStatPlayerName);
+
+  // 💡 모달 데이터 생성 헬퍼 함수
+  const openBreakdown = (title, type, key) => {
+    const data = playerStatsList.map(p => {
+      let count = 0;
+      if (type === 'yaku') count = p.yakus[key] || 0;
+      else if (type === 'wait') count = p.waitTypes[key] || 0;
+      else if (type === 'winType') count = p[key] || 0;
+      return { name: p.name, count };
+    }).filter(p => p.count > 0).sort((a, b) => b.count - a.count);
+    setBreakdownData({ title, data });
+  };
 
   const globalYakuStats = useMemo(() => {
     const yCounts = {};
@@ -409,10 +410,13 @@ function App() {
       else if (rankingSort === 'firstRate') diff = parseFloat(b.firstRate) - parseFloat(a.firstRate);
       else if (rankingSort === 'rentaiRate') diff = parseFloat(b.rentaiRate) - parseFloat(a.rentaiRate);
       else if (rankingSort === 'tobiRate') diff = parseFloat(a.tobiRate) - parseFloat(b.tobiRate); 
+      
+      // 💡 동점 시 가나다순 정렬
       if (diff === 0) return a.name.localeCompare(b.name);
       return diff;
     });
 
+    // 💡 공동 순위 로직 (1, 2, 2, 4...)
     let currentRank = 1;
     return sorted.map((player, index, arr) => {
       if (index > 0) {
@@ -440,17 +444,20 @@ function App() {
       
       {/* 🚀 상단 헤더 */}
       <header className="bg-[#2E7D32] text-white p-4 pt-10 shadow-md z-20">
-        <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center justify-between mb-3 min-h-[36px]">
           {activeNav === '기록' && selectedGameId !== null ? (
-             <button onClick={() => setSelectedGameId(null)} className="p-1 hover:bg-green-700 rounded-full transition-colors"><ChevronLeft size={28} /></button>
+            <div className="flex items-center w-full">
+              <button onClick={() => setSelectedGameId(null)} className="p-1 hover:bg-green-700 rounded-full transition-colors absolute left-4"><ChevronLeft size={28} /></button>
+              <h1 className="text-xl font-bold tracking-tight w-full text-center pr-4">대국 상세 기록</h1>
+            </div>
           ) : (
              <h1 className="text-xl font-bold tracking-tight">
-               {activeNav === '기록' && '리치마작 기록'}
-               {activeNav === '통계' && '마작 통계'}
-               {activeNav === '랭킹' && '플레이어 랭킹'}
-               {activeNav === '업데이트' && '업데이트 내역'}
+               {activeNav === '기록' ? '리치마작 기록' : 
+                activeNav === '통계' ? '마작 통계' : 
+                activeNav === '랭킹' ? '플레이어 랭킹' : '업데이트 내역'}
              </h1>
           )}
+          
           {selectedGameId === null && (
             <div className="flex items-center gap-1.5">
               {currentUser ? (
@@ -476,17 +483,18 @@ function App() {
         )}
       </header>
 
+      {/* 상단 탭 (기록 화면 메인에서만 노출) */}
       {activeNav === '기록' && selectedGameId === null && (
         <div className="flex bg-white border-b border-gray-200 shadow-sm z-10 sticky top-0">
-          <button className={`flex-1 py-3 text-center font-bold flex justify-center items-center gap-2 border-b-2 ${activeTab === '4인' ? 'border-[#2E7D32] text-[#2E7D32]' : 'border-transparent text-gray-500'}`} onClick={() => setActiveTab('4인')}>
-            4인 게임 <span className={`text-[10px] px-2 py-0.5 rounded-full text-white ${activeTab === '4인' ? 'bg-[#2E7D32]' : 'bg-gray-300'}`}>{games.filter(g=>g.type==='4인').length}</span>
-          </button>
-          <button className={`flex-1 py-3 text-center font-bold flex justify-center items-center gap-2 border-b-2 ${activeTab === '3인' ? 'border-[#2E7D32] text-[#2E7D32]' : 'border-transparent text-gray-500'}`} onClick={() => setActiveTab('3인')}>
-            3인 게임 <span className={`text-[10px] px-2 py-0.5 rounded-full text-white ${activeTab === '3인' ? 'bg-[#2E7D32]' : 'bg-gray-300'}`}>{games.filter(g=>g.type==='3인').length}</span>
-          </button>
+          {['전체', '4인', '3인'].map(t => (
+            <button key={t} onClick={() => setActiveTab(t)} className={`flex-1 py-3 text-center font-bold flex justify-center items-center gap-1.5 border-b-2 ${activeTab === t ? 'border-[#2E7D32] text-[#2E7D32]' : 'border-transparent text-gray-500'}`}>
+              {t} 게임 <span className={`text-[10px] px-2 py-0.5 rounded-full text-white ${activeTab === t ? 'bg-[#2E7D32]' : 'bg-gray-300'}`}>{t === '전체' ? games.length : games.filter(g=>g.type===t).length}</span>
+            </button>
+          ))}
         </div>
       )}
 
+      {/* 🔍 검색창 (기록 메인) */}
       {activeNav === '기록' && selectedGameId === null && (
         <div className="p-4 pb-0 bg-[#F5F5DC]">
           <div className="relative">
@@ -520,13 +528,37 @@ function App() {
                       {canWrite && <button onClick={(e) => handleDeleteGame(e, game.id)} className="text-red-300 hover:text-red-500 p-1"><Trash2 size={16} /></button>}
                     </div>
                     {game.status === '종료' && game.finalResults ? (
-                      <div className={`bg-gray-50 rounded-xl p-3 border border-gray-100 grid gap-x-4 gap-y-2 mt-1 ${game.type === '4인' ? 'grid-cols-2' : 'grid-cols-1'}`}>
+                      <div className={`grid gap-2 mt-2 ${game.type === '4인' ? 'grid-cols-2' : 'grid-cols-1'}`}>
                         {game.players.map((p, i) => (
-                          <div key={i} className="flex justify-between items-center"><div className="flex items-center gap-1.5"><span className="text-[10px] font-black text-[#2E7D32]">{['동','남','서','북'][i]}</span><span className="text-[12px] font-bold text-gray-700 truncate w-14">{p}</span></div><div className="flex flex-col items-end"><span className={`text-[12px] font-black leading-none ${game.finalResults[i].pt > 0 ? 'text-[#2E7D32]' : game.finalResults[i].pt < 0 ? 'text-red-500' : 'text-gray-500'}`}>{game.finalResults[i].pt > 0 ? '+' : ''}{game.finalResults[i].pt}</span><span className="text-[9px] font-medium text-gray-400 leading-none mt-1">{Number(game.finalResults[i].score).toLocaleString()}</span></div></div>
+                          <div key={i} className="flex items-center justify-between bg-white p-2 rounded-xl shadow-sm border border-gray-100">
+                            <div className="flex items-center gap-3 overflow-hidden">
+                              <div className="bg-[#2E7D32] text-white w-8 h-8 min-w-[32px] rounded-lg flex items-center justify-center font-bold text-sm shadow-inner">
+                                {['동','남','서','북'][i]}
+                              </div>
+                              <span className="text-sm font-bold text-gray-800 truncate">{p}</span>
+                            </div>
+                            <div className="flex flex-col items-end pr-1">
+                              <span className={`text-sm font-black ${game.finalResults[i].pt > 0 ? 'text-[#2E7D32]' : game.finalResults[i].pt < 0 ? 'text-red-500' : 'text-gray-500'}`}>
+                                {game.finalResults[i].pt > 0 ? '+' : ''}{game.finalResults[i].pt}
+                              </span>
+                              <span className="text-[11px] font-bold text-gray-400 mt-0.5">
+                                {Number(game.finalResults[i].score).toLocaleString()}
+                              </span>
+                            </div>
+                          </div>
                         ))}
                       </div>
                     ) : (
-                      <div className="flex gap-2 text-[10px] font-medium mt-1">{game.players.map((p, i) => (<span key={i} className="text-gray-600"><span className="font-bold text-[#2E7D32]">{['동','남','서','북'][i]}</span> {p}</span>))}</div>
+                      <div className={`grid gap-2 mt-2 ${game.type === '4인' ? 'grid-cols-2' : 'grid-cols-1'}`}>
+                        {game.players.map((p, i) => (
+                          <div key={i} className="flex items-center gap-3 bg-white p-2 rounded-xl shadow-sm border border-gray-100">
+                            <div className="bg-[#2E7D32] text-white w-8 h-8 min-w-[32px] rounded-lg flex items-center justify-center font-bold text-sm shadow-inner">
+                              {['동','남','서','북'][i]}
+                            </div>
+                            <span className="text-sm font-bold text-gray-700 truncate">{p}</span>
+                          </div>
+                        ))}
+                      </div>
                     )}
                   </div>
                 );
@@ -541,11 +573,24 @@ function App() {
         {/* ========================================= */}
         {activeNav === '기록' && selectedGameId !== null && currentGame && (
           <div className="flex-1 flex flex-col">
-            <div className="bg-white border-b border-gray-200 grid grid-cols-4 divide-x divide-gray-100 text-center py-2.5 shadow-sm z-10 sticky top-0"><div className="flex flex-col"><span className="text-lg font-black text-[#2E7D32]">{totalRecords}</span><span className="text-[9px] text-gray-500 font-bold">총 기록</span></div><div className="flex flex-col"><span className="text-lg font-black text-[#2E7D32]">{tsumoCount}</span><span className="text-[9px] text-gray-500 font-bold">쯔모</span></div><div className="flex flex-col"><span className="text-lg font-black text-orange-500">{ronCount}</span><span className="text-[9px] text-gray-500 font-bold">론</span></div><div className="flex flex-col"><span className="text-lg font-black text-gray-800">{avgHan}</span><span className="text-[9px] text-gray-500 font-bold">평균판수</span></div></div>
+            <div className="bg-white border-b border-gray-200 grid grid-cols-4 divide-x divide-gray-100 text-center py-2.5 shadow-sm z-10 sticky top-0">
+              <div className="flex flex-col"><span className="text-lg font-black text-[#2E7D32]">{totalRecords}</span><span className="text-[9px] text-gray-500 font-bold">총 기록</span></div>
+              <div className="flex flex-col"><span className="text-lg font-black text-[#2E7D32]">{tsumoCount}</span><span className="text-[9px] text-gray-500 font-bold">쯔모</span></div>
+              <div className="flex flex-col"><span className="text-lg font-black text-orange-500">{ronCount}</span><span className="text-[9px] text-gray-500 font-bold">론</span></div>
+              <div className="flex flex-col"><span className="text-lg font-black text-gray-500">{drawCount}</span><span className="text-[9px] text-gray-500 font-bold">유국</span></div>
+            </div>
 
             <div className="p-4 pb-0">
-              <div className="bg-[#2E7D32] bg-opacity-5 p-3 rounded-xl border border-green-100 flex justify-between items-center text-sm font-bold shadow-inner">{players.map((p, i) => (<div key={i} className={`text-center flex-1 ${i>0 && 'border-l border-green-200 border-opacity-50'}`}><span className="block text-[9px] mb-0.5 text-[#2E7D32]">{['동','남','서','북'][i]}</span>{p}</div>))}</div>
-
+              <div className="bg-[#2E7D32] bg-opacity-5 p-3 rounded-xl border border-green-100 flex justify-between items-center text-sm font-bold shadow-inner">
+                {players.map((p, i) => (
+                  <div key={i} className={`text-center flex-1 flex flex-col items-center ${i > 0 ? "border-l border-green-200 border-opacity-50" : ""}`}>
+                    <div className={`w-7 h-7 rounded-lg flex items-center justify-center text-white text-[13px] mb-1.5 shadow-sm bg-[#2E7D32]`}>
+                      {["동", "남", "서", "북"][i]}
+                    </div>
+                    <span className="block text-gray-800">{p}</span>
+                  </div>
+                ))}
+              </div>
               {currentGame.status === '종료' && currentGame.finalResults && (
                 <div className="bg-[#1e293b] text-white rounded-xl p-4 mt-4 relative shadow-lg animate-in fade-in">
                   {canWrite && <button onClick={handleOpenEndGame} className="absolute top-3 right-3 text-[10px] font-bold bg-gray-700 hover:bg-gray-600 px-2 py-1 rounded flex items-center gap-1 transition-colors"><Edit size={10}/> 수정</button>}
@@ -563,29 +608,33 @@ function App() {
                 <div className="text-center py-10 text-gray-400 font-bold"><p>우측 하단의 + 버튼을 눌러</p><p>첫 번째 국을 기록해주세요!</p></div>
               ) : (
                 records.map(record => (
-                  <div key={record.id} className={`rounded-xl p-3 shadow-sm border relative animate-in fade-in slide-in-from-bottom-2 ${record.type === '촌보' ? 'bg-red-50 border-red-200' : record.type === '유국' ? 'bg-gray-50 border-gray-300' : 'bg-white border-gray-100'}`}>
-                    <div className="flex justify-between items-center mb-2">
-                      <div className="flex items-center gap-2">
-                        {record.type === '화료' && <span className="bg-[#2E7D32] bg-opacity-10 text-[#2E7D32] px-2 py-0.5 rounded font-bold text-[11px]">{record.han}판</span>}
-                        {record.type === '유국' && <span className="bg-gray-200 text-gray-600 px-2 py-0.5 rounded font-bold text-[11px]">유국</span>}
-                        {record.type === '촌보' && <span className="bg-red-200 text-red-700 px-2 py-0.5 rounded font-bold text-[11px]">촌보</span>}
-                        <span className="font-bold text-gray-800 text-sm">{record.wind}{record.roundNum}국 {record.honba > 0 && `${record.honba}본`}</span>
-                      </div>
-                      {canWrite && <button onClick={() => handleDeleteRound(record.id)} className="text-red-300 hover:text-red-500 p-1"><Trash2 size={14} /></button>}
+                  <div key={record.id} className={`rounded-xl shadow-sm border relative overflow-hidden animate-in fade-in slide-in-from-bottom-2 ${record.type === '촌보' ? 'bg-red-50 border-red-200' : record.type === '유국' ? 'bg-gray-50 border-gray-300' : 'bg-white border-gray-100'}`}>
+                    
+                    {/* 💡 카드 타이틀 (헤더) 영역 추가 */}
+                    <div className={`px-3 py-2 border-b flex justify-between items-center ${record.type === '촌보' ? 'bg-red-100 border-red-200' : record.type === '유국' ? 'bg-gray-200 border-gray-300' : 'bg-gray-100 border-gray-200'}`}>
+                      <span className={`font-bold text-sm ${record.type === '촌보' ? 'text-red-800' : 'text-gray-700'}`}>
+                        {record.wind}{record.roundNum}국 {record.honba > 0 && `${record.honba}본장`}
+                        {record.type === '유국' && ' (유국)'}
+                        {record.type === '촌보' && ' (촌보)'}
+                      </span>
+                      {canWrite && <button onClick={() => handleDeleteRound(record.id)} className="text-gray-400 hover:text-red-500 transition-colors"><Trash2 size={14} /></button>}
                     </div>
 
-                    {record.type === '화료' ? (
-                      <>
-                        <div className="flex items-center gap-2 mb-2"><span className={`font-bold text-[11px] ${record.winType === '쯔모' ? 'text-[#2E7D32]' : 'text-orange-500'}`}>{record.winType}</span><span className="font-bold text-sm text-gray-800">{record.winner} {record.winType === '론' && <span className="text-gray-400 text-xs font-medium mx-1">← {record.loser}</span>}</span>{record.score && <span className="ml-auto font-black text-[#2E7D32] text-xs">{Number(record.score).toLocaleString()}점</span>}</div>
-                        <div className="flex flex-wrap gap-1 mb-1.5"><span className="bg-gray-100 text-gray-600 text-[9px] px-1.5 py-0.5 rounded font-bold">{record.waitType}</span><span className="bg-gray-100 text-gray-600 text-[9px] px-1.5 py-0.5 rounded font-bold">{record.menzen}</span>{record.selectedYaku?.map(yaku => <span key={yaku} className="bg-green-50 text-green-700 text-[9px] px-1.5 py-0.5 rounded font-bold border border-green-100">{yaku} {record.furoDecreased.includes(yaku) && '(-1판)'}</span>)}{(record.dora + record.aka + record.ura + record.pei) > 0 && (<span className="bg-amber-50 text-amber-600 text-[9px] px-1.5 py-0.5 rounded font-bold border border-amber-200">도라합 {record.dora + record.aka + record.ura + record.pei}</span>)}</div>
-                        <div className="text-[10px] text-gray-400 font-bold mt-1">{record.han}판 {record.fu}부</div>
-                      </>
-                    ) : record.type === '유국' ? (
-                      <div className="space-y-1.5 mt-1"><div className="flex items-center gap-1.5"><ShieldAlert size={14} className="text-gray-500" /><span className="font-bold text-gray-800 text-sm">{record.abortiveType ? `도중유국 (${record.abortiveType})` : '황패유국'}</span></div>{!record.abortiveType && (<div className="text-[11px] font-bold text-gray-600 pl-5 space-y-0.5"><p className="text-gray-500">텐파이: <span className="text-gray-800">{record.tenpaiPlayers.length > 0 ? record.tenpaiPlayers.join(', ') : '전원 노텐'}</span></p>{record.nagashiMangan?.length > 0 && (<p className="text-gray-500 mt-1">유국만관: {record.nagashiMangan.map(p => <span key={p} className="bg-red-100 text-red-600 px-1.5 py-0.5 rounded ml-1">{p}</span>)}</p>)}</div>)}</div>
-                    ) : (
-                      <div className="space-y-1 mt-1"><div className="flex items-center gap-1.5"><AlertOctagon size={14} className="text-red-500" /><span className="font-bold text-red-700 text-sm">{record.chomboPlayer} 촌보</span></div><p className="text-xs font-bold text-red-500 pl-5">처리: {record.chomboType}</p></div>
-                    )}
-                    {record.comment && (<div className="mt-2 pt-2 border-t border-gray-100 border-opacity-50 text-[10px] text-gray-500 font-medium flex gap-1"><MessageSquare size={12} className="mt-0.5" /> {record.comment}</div>)}
+                    {/* 💡 카드 본문 영역 */}
+                    <div className="p-3 pt-2.5">
+                      {record.type === '화료' ? (
+                        <>
+                          <div className="flex items-center gap-2 mb-2"><span className={`font-bold text-[11px] ${record.winType === '쯔모' ? 'text-[#2E7D32]' : 'text-orange-500'}`}>{record.winType}</span><span className="font-bold text-sm text-gray-800">{record.winner} {record.winType === '론' && <span className="text-gray-400 text-xs font-medium mx-1">← {record.loser}</span>}</span>{record.score && <span className="ml-auto font-black text-[#2E7D32] text-xs">{Number(record.score).toLocaleString()}점</span>}</div>
+                          <div className="flex flex-wrap gap-1 mb-1.5"><span className="bg-gray-100 text-gray-600 text-[9px] px-1.5 py-0.5 rounded font-bold">{record.waitType}</span><span className="bg-gray-100 text-gray-600 text-[9px] px-1.5 py-0.5 rounded font-bold">{record.menzen}</span>{record.selectedYaku?.map(yaku => <span key={yaku} className="bg-green-50 text-green-700 text-[9px] px-1.5 py-0.5 rounded font-bold border border-green-100">{yaku} {record.furoDecreased.includes(yaku) && '(-1판)'}</span>)}{(record.dora + record.aka + record.ura + record.pei) > 0 && (<span className="bg-amber-50 text-amber-600 text-[9px] px-1.5 py-0.5 rounded font-bold border border-amber-200">도라 {record.dora + record.aka + record.ura + record.pei}</span>)}</div>
+                          <div className="text-[10px] text-gray-400 font-bold mt-1">{record.han}판 {record.fu}부</div>
+                        </>
+                      ) : record.type === '유국' ? (
+                        <div className="space-y-1.5"><div className="flex items-center gap-1.5"><ShieldAlert size={14} className="text-gray-500" /><span className="font-bold text-gray-800 text-sm">{record.abortiveType ? `도중유국 (${record.abortiveType})` : '황패유국'}</span></div>{!record.abortiveType && (<div className="text-[11px] font-bold text-gray-600 pl-5 space-y-0.5"><p className="text-gray-500">텐파이: <span className="text-gray-800">{record.tenpaiPlayers.length > 0 ? record.tenpaiPlayers.join(', ') : '전원 노텐'}</span></p>{record.nagashiMangan?.length > 0 && (<p className="text-gray-500 mt-1">유국만관: {record.nagashiMangan.map(p => <span key={p} className="bg-red-100 text-red-600 px-1.5 py-0.5 rounded ml-1">{p}</span>)}</p>)}</div>)}</div>
+                      ) : (
+                        <div className="space-y-1"><div className="flex items-center gap-1.5"><AlertOctagon size={14} className="text-red-500" /><span className="font-bold text-red-700 text-sm">{record.chomboPlayer} 촌보</span></div><p className="text-xs font-bold text-red-500 pl-5">처리: {record.chomboType}</p></div>
+                      )}
+                      {record.comment && (<div className="mt-2 pt-2 border-t border-gray-100 border-opacity-50 text-[10px] text-gray-500 font-medium flex gap-1"><MessageSquare size={12} className="mt-0.5" /> {record.comment}</div>)}
+                    </div>
                   </div>
                 ))
               )}
@@ -625,7 +674,7 @@ function App() {
                         <div className="p-4 border-b border-gray-100 flex justify-between items-center">
                           <div>
                             <h3 className="font-bold text-xl text-gray-800">{stat.name}</h3>
-                            <span className="text-xs text-gray-500 font-bold mt-1 inline-block">{stat.gamesPlayed}전 ({stat.roundsPlayed}국)</span>
+                            <span className="text-xs text-gray-500 font-bold mt-1 inline-block">{stat.gamesPlayed}국 </span>
                           </div>
                           <div className="bg-green-50 p-3 rounded-xl border border-green-100 text-center min-w-[80px]">
                             <span className="block text-[10px] text-gray-500 font-bold mb-0.5">현재 우마</span>
@@ -672,7 +721,6 @@ function App() {
 
               {statsSubTab === '화료' && (
                 <div className="space-y-4">
-                  {/* 리치/다마/후로 비율 (신규 추가) */}
                   <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-5">
                     <h3 className="font-bold text-lg text-gray-800 mb-4 border-b pb-2">전체 화료 비율</h3>
                     {globalWinStats.winCount === 0 ? <p className="text-xs text-gray-400">데이터 없음</p> : (
@@ -696,7 +744,6 @@ function App() {
                     )}
                   </div>
 
-                  {/* 멘젠/비멘젠 비율 */}
                   <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-5">
                     <h3 className="font-bold text-lg text-gray-800 mb-4 border-b pb-2">화료 형태별 비율</h3>
                     {globalWinStats.winCount === 0 ? <p className="text-xs text-gray-400">데이터 없음</p> : (
@@ -719,7 +766,6 @@ function App() {
                     )}
                   </div>
                   
-                  {/* 대기 형태별 비율 */}
                   <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-5">
                     <h3 className="font-bold text-lg text-gray-800 mb-4 border-b pb-2">대기 형태별 비율</h3>
                     <div className="space-y-3">
@@ -778,19 +824,18 @@ function App() {
                     if(rankingSort === 'firstRate') { highlightText = player.firstRate+'%'; highlightLabel = '1위율'; }
                     if(rankingSort === 'rentaiRate') { highlightText = player.rentaiRate+'%'; highlightLabel = '연대율'; }
                     if(rankingSort === 'tobiRate') { highlightText = player.tobiRate+'%'; highlightLabel = '들통율'; }
-                    if(rankingSort === 'gameCount') { highlightText = player.gamesPlayed+'전'; highlightLabel = '대국 수'; }
+                    if(rankingSort === 'gameCount') { highlightText = player.gamesPlayed+'국'; highlightLabel = '대국 수'; }
 
                     return (
                       <div key={player.name} className="bg-white p-4 rounded-[20px] shadow-sm border border-gray-100 flex items-center justify-between animate-in fade-in slide-in-from-bottom-2">
                         <div className="flex items-center gap-4">
-                          {/* 💡 공동 순위 적용 완료 */}
                           <div className={`w-10 h-10 rounded-full flex items-center justify-center font-black text-white shadow-inner text-lg ${player.rank === 1 ? 'bg-yellow-400' : player.rank === 2 ? 'bg-gray-400' : player.rank === 3 ? 'bg-amber-600' : 'bg-gray-200 text-gray-600'}`}>{player.rank}</div>
                           <div>
                             <h3 className="font-bold text-base text-gray-800 leading-tight">{player.name}</h3>
                             <div className="text-[10px] text-gray-500 font-bold mt-1 flex gap-1.5 items-center">
-                              <span className="bg-gray-100 px-1.5 py-0.5 rounded">{player.gamesPlayed}전</span>
-                              <span className="bg-green-50 text-green-700 px-1.5 py-0.5 rounded">1위 {player.firstRate}%</span>
-                              <span className="bg-orange-50 text-orange-700 px-1.5 py-0.5 rounded">연대 {player.rentaiRate}%</span>
+                              <span className="bg-gray-100 px-1.5 py-0.5 rounded">{player.gamesPlayed}국</span>
+                              {/* <span className="bg-green-50 text-green-700 px-1.5 py-0.5 rounded">1위 {player.firstRate}%</span>
+                              <span className="bg-orange-50 text-orange-700 px-1.5 py-0.5 rounded">연대 {player.rentaiRate}%</span> */}
                             </div>
                           </div>
                         </div>
@@ -876,7 +921,7 @@ function App() {
             
             <div className="flex-1 overflow-y-auto p-4 space-y-4">
               <div className="grid grid-cols-2 gap-3">
-                <div className="bg-white p-3 rounded-xl shadow-sm border border-gray-200 text-center"><span className="block text-[10px] text-gray-500 font-bold mb-1">대국 수</span><span className="text-xl font-black text-gray-800">{selectedStatPlayer.gamesPlayed}전</span></div>
+                <div className="bg-white p-3 rounded-xl shadow-sm border border-gray-200 text-center"><span className="block text-[10px] text-gray-500 font-bold mb-1">대국 수</span><span className="text-xl font-black text-gray-800">{selectedStatPlayer.gamesPlayed}국</span></div>
                 <div className="bg-green-50 p-3 rounded-xl shadow-sm border border-green-200 text-center"><span className="block text-[10px] text-green-700 font-bold mb-1">현재 우마</span><span className={`text-xl font-black ${selectedStatPlayer.totalUma > 0 ? 'text-[#2E7D32]' : selectedStatPlayer.totalUma < 0 ? 'text-red-500' : 'text-gray-800'}`}>{selectedStatPlayer.totalUma > 0 ? '+' : ''}{selectedStatPlayer.totalUma.toFixed(1)}</span></div>
               </div>
 
@@ -909,11 +954,11 @@ function App() {
                 <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-2"><span className="block text-[9px] text-gray-500 font-bold mb-1">최고 점수</span><span className="text-sm font-black text-gray-800">{selectedStatPlayer.maxScore === -99999 ? '-' : Number(selectedStatPlayer.maxScore).toLocaleString()}</span></div>
                 <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-2"><span className="block text-[9px] text-gray-500 font-bold mb-1">최소 점수</span><span className="text-sm font-black text-gray-800">{selectedStatPlayer.minScore === 99999 ? '-' : Number(selectedStatPlayer.minScore).toLocaleString()}</span></div>
                 <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-2"><span className="block text-[9px] text-gray-500 font-bold mb-1">평균 소점</span><span className="text-sm font-black text-gray-800">{Number(selectedStatPlayer.avgScore).toLocaleString()}</span></div>
-                <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-2"><span className="block text-[9px] text-gray-500 font-bold mb-1">평균 타점</span><span className="text-sm font-black text-[#2E7D32]">{Number(selectedStatPlayer.avgWinScore).toLocaleString()}</span></div>           
+                <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-2"><span className="block text-[9px] text-gray-500 font-bold mb-1">평균 타점</span><span className="text-sm font-black text-[#2E7D32]">{Number(selectedStatPlayer.avgWinScore).toLocaleString()}점</span></div>
                 <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-2"><span className="block text-[9px] text-gray-500 font-bold mb-1">평균 순위</span><span className="text-sm font-black text-amber-600">{selectedStatPlayer.avgRank}위</span></div>
                 <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-2"><span className="block text-[9px] text-gray-500 font-bold mb-1">평균 우마</span><span className="text-sm font-black text-gray-800">{selectedStatPlayer.avgUma}</span></div>
                 <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-2"><span className="block text-[9px] text-gray-500 font-bold mb-1">최대 연장</span><span className="text-sm font-black text-gray-800">{selectedStatPlayer.maxHonba}본장</span></div>
-                <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-2"><span className="block text-[9px] text-gray-500 font-bold mb-1">평균 방총점</span><span className="text-sm font-black text-orange-500">{Number(selectedStatPlayer.avgDealInScore).toLocaleString()}</span></div>
+                <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-2"><span className="block text-[9px] text-gray-500 font-bold mb-1">평균 방총점</span><span className="text-sm font-black text-orange-500">{Number(selectedStatPlayer.avgDealInScore).toLocaleString()}점</span></div>
               </div>
 
               <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
@@ -979,8 +1024,8 @@ function App() {
             <button onClick={() => setIsAuthModalOpen(false)} className="absolute top-4 right-4 text-gray-400 hover:text-gray-600"><X size={20}/></button>
             <div className="flex mb-6 border-b border-gray-200"><button onClick={()=>setAuthMode('login')} className={`flex-1 pb-2 font-bold ${authMode === 'login' ? 'text-[#2E7D32] border-b-2 border-[#2E7D32]' : 'text-gray-400'}`}>로그인</button><button onClick={()=>setAuthMode('signup')} className={`flex-1 pb-2 font-bold ${authMode === 'signup' ? 'text-[#2E7D32] border-b-2 border-[#2E7D32]' : 'text-gray-400'}`}>회원가입</button></div>
             <div className="space-y-4">
-              <input type="text" placeholder="이름 (예: 하태원)" value={authName} onChange={e=>setAuthName(e.target.value)} className="w-full p-3 border border-gray-300 rounded-xl focus:outline-none focus:border-[#2E7D32] font-bold" />
-              <input type="password" inputMode="numeric" maxLength={4} placeholder="비밀번호 (숫자 4자리)" value={authPin} onChange={e=>setAuthPin(e.target.value)} className="w-full p-3 border border-gray-300 rounded-xl focus:outline-none focus:border-[#2E7D32] font-bold tracking-[0.5em] text-center" />
+              <input type="text" placeholder="이름 (예: 홍길동)" value={authName} onChange={e=>setAuthName(e.target.value)} className="w-full p-3 border border-gray-300 rounded-xl focus:outline-none focus:border-[#2E7D32] font-bold" />
+              <input type="password" inputMode="numeric" maxLength={4} placeholder="비밀번호 (숫자 4자리)" value={authPin} onChange={e=>setAuthPin(e.target.value)} className="w-full p-3 border border-gray-300 rounded-xl focus:outline-none focus:border-[#2E7D32] font-bold tracking-[0.5em]" />
               {authMode === 'signup' && (
                 <div className="p-3 bg-gray-50 border border-gray-200 rounded-xl"><span className="block text-xs font-bold text-gray-500 mb-2">요청 권한 선택</span><select value={authRoleReq} onChange={e=>setAuthRoleReq(e.target.value)} className="w-full bg-white p-2 rounded border border-gray-300 font-bold focus:outline-none"><option value="player">작사 (일반 유저)</option><option value="admin">관리자 (시즌 관리 등)</option></select><p className="text-[10px] text-gray-400 mt-2">* 관리자 권한은 마스터의 승인이 필요합니다.</p></div>
               )}
@@ -1044,37 +1089,77 @@ function App() {
       {isRoundModalOpen && (
         <div className="absolute inset-0 bg-[#F5F5DC] z-50 flex flex-col overflow-hidden animate-in slide-in-from-bottom">
           <div className="bg-[#2E7D32] text-white p-4 flex justify-between items-center pt-10 shadow-sm z-10"><button onClick={() => setIsRoundModalOpen(false)}><ChevronLeft size={28} /></button><h2 className="text-xl font-bold">{wind}{roundNum}국 기록</h2><button onClick={handleSaveRound} className="text-sm font-bold bg-green-700 px-3 py-1 rounded hover:bg-green-600">저장</button></div>
-          <div className="flex bg-white shadow-sm z-10 text-sm"><button onClick={() => setRecordMode('화료')} className={`flex-1 py-4 font-bold border-b-4 transition-colors ${recordMode === '화료' ? 'border-[#2E7D32] text-[#2E7D32]' : 'border-transparent text-gray-400'}`}>화료 (Win)</button><button onClick={() => setRecordMode('유국')} className={`flex-1 py-4 font-bold border-b-4 transition-colors ${recordMode === '유국' ? 'border-gray-600 text-gray-700' : 'border-transparent text-gray-400'}`}>유국 (Draw)</button><button onClick={() => setRecordMode('촌보')} className={`flex-1 py-4 font-bold border-b-4 transition-colors ${recordMode === '촌보' ? 'border-red-500 text-red-600' : 'border-transparent text-gray-400'}`}>촌보 (Chombo)</button></div>
+          <div className="flex bg-white shadow-sm z-10 text-sm"><button onClick={() => setRecordMode('화료')} className={`flex-1 py-4 font-bold border-b-4 transition-colors ${recordMode === '화료' ? 'border-[#2E7D32] text-[#2E7D32]' : 'border-transparent text-gray-400'}`}>화료</button><button onClick={() => setRecordMode('유국')} className={`flex-1 py-4 font-bold border-b-4 transition-colors ${recordMode === '유국' ? 'border-gray-600 text-gray-700' : 'border-transparent text-gray-400'}`}>유국</button><button onClick={() => setRecordMode('촌보')} className={`flex-1 py-4 font-bold border-b-4 transition-colors ${recordMode === '촌보' ? 'border-red-500 text-red-600' : 'border-transparent text-gray-400'}`}>촌보</button></div>
           <div className="flex-1 overflow-y-auto p-4 space-y-8 pb-32">
             <section className="space-y-3">
-              <div className="flex items-center gap-4"><span className="text-gray-500 font-bold w-8 text-sm">국풍</span><div className="flex gap-2">{['동', '남', '서', '북'].map(w => <button key={w} onClick={() => setWind(w)} className={`w-10 h-10 rounded-lg font-bold border-2 ${wind === w ? 'bg-[#2E7D32] border-[#2E7D32] text-white' : 'bg-white border-gray-200 text-gray-400'}`}>{w}</button>)}</div><div className="flex-1 flex items-center justify-end gap-2"><span className="font-bold text-[#2E7D32] text-sm">국</span><div className="flex items-center bg-white rounded-lg border border-gray-200"><button onClick={() => setRoundNum(Math.max(1, roundNum - 1))} className="w-8 h-8 font-bold">-</button><span className="w-6 text-center font-bold text-green-700">{roundNum}</span><button onClick={() => setRoundNum(Math.min(4, roundNum + 1))} className="w-8 h-8 font-bold">+</button></div></div></div>
-              <div className="flex gap-3"><div className="flex-1 flex justify-between p-2.5 bg-white rounded-xl border border-gray-100 items-center"><span className="font-bold text-green-700 text-sm">본장</span><div className="flex items-center gap-2"><button onClick={() => setHonba(Math.max(0, honba - 1))} className="bg-gray-100 w-8 h-8 rounded font-bold">-</button><span className="font-bold text-lg w-4 text-center">{honba}</span><button onClick={() => setHonba(honba + 1)} className="bg-gray-100 w-8 h-8 rounded font-bold">+</button></div></div><div className="flex-1 flex justify-between p-2.5 bg-white rounded-xl border border-gray-100 items-center"><span className="font-bold text-orange-600 text-sm">공탁</span><div className="flex items-center gap-2"><button onClick={() => setKyotaku(Math.max(0, kyotaku - 1))} className="bg-gray-100 w-8 h-8 rounded font-bold">-</button><span className="font-bold text-lg w-4 text-center">{kyotaku}</span><button onClick={() => setKyotaku(kyotaku + 1)} className="bg-gray-100 w-8 h-8 rounded font-bold">+</button></div></div></div>
+              {/* 💡 소제목 추가 */}
+              <h3 className="font-bold text-base text-gray-800 border-b pb-1">국 / 본장 / 공탁</h3>
+              
+              {/* 💡 국풍과 국 번호를 2개의 개별 흰색 박스로 분리 (본장/공탁과 동일한 스타일) */}
+              <div className="flex flex-wrap gap-3">
+                {/* 국풍 박스 */}
+                <div className="flex-1 flex justify-between items-center p-2.5 bg-white rounded-xl border border-gray-100 shadow-sm min-w-[200px]">
+                  <span className="font-bold text-green-700 text-sm">국풍</span>
+                  <div className="flex gap-1">
+                    {['동', '남', '서', '북'].map(w => (
+                      <button key={w} onClick={() => setWind(w)} className={`w-8 h-8 rounded-lg font-bold border-2 transition-colors ${wind === w ? 'bg-[#2E7D32] border-[#2E7D32] text-white' : 'bg-white border-gray-200 text-gray-400'}`}>{w}</button>
+                    ))}
+                  </div>
+                </div>
+                {/* 국 번호 박스 */}
+                <div className="flex-1 flex justify-between items-center p-2.5 bg-white rounded-xl border border-gray-100 shadow-sm min-w-[120px]">
+                  <span className="font-bold text-[#2E7D32] text-sm">국 번호</span>
+                  <div className="flex items-center gap-1.5">
+                    <button onClick={() => setRoundNum(Math.max(1, roundNum - 1))} className="bg-gray-100 w-8 h-8 rounded font-bold hover:bg-gray-200">-</button>
+                    <span className="font-bold text-lg w-4 text-center text-black">{roundNum}</span>
+                    <button onClick={() => setRoundNum(Math.min(4, roundNum + 1))} className="bg-gray-100 w-8 h-8 rounded font-bold hover:bg-gray-200">+</button>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex gap-3">
+                <div className="flex-1 flex justify-between p-2.5 bg-white rounded-xl border border-gray-100 shadow-sm items-center">
+                  <span className="font-bold text-green-700 text-sm">본장</span>
+                  <div className="flex items-center gap-1.5">
+                    <button onClick={() => setHonba(Math.max(0, honba - 1))} className="bg-gray-100 w-8 h-8 rounded font-bold hover:bg-gray-200">-</button>
+                    <span className="font-bold text-lg w-4 text-center text-black-700">{honba}</span>
+                    <button onClick={() => setHonba(honba + 1)} className="bg-gray-100 w-8 h-8 rounded font-bold hover:bg-gray-200">+</button>
+                  </div>
+                </div>
+                <div className="flex-1 flex justify-between p-2.5 bg-white rounded-xl border border-gray-100 shadow-sm items-center">
+                  <span className="font-bold text-green-700 text-sm">공탁</span>
+                  <div className="flex items-center gap-1.5">
+                    <button onClick={() => setKyotaku(Math.max(0, kyotaku - 1))} className="bg-gray-100 w-8 h-8 rounded font-bold hover:bg-gray-200">-</button>
+                    <span className="font-bold text-lg w-4 text-center text-black-700">{kyotaku}</span>
+                    <button onClick={() => setKyotaku(kyotaku + 1)} className="bg-gray-100 w-8 h-8 rounded font-bold hover:bg-gray-200">+</button>
+                  </div>
+                </div>
+              </div>
             </section>
 
             {recordMode === '화료' ? (
               <>
-                <section className="space-y-3"><h3 className="font-bold text-base text-gray-800 border-b pb-1">기본 정보</h3><div className="flex gap-2"><button onClick={() => handleWinTypeChange('쯔모')} className={`flex-1 py-3 rounded-xl font-bold border-2 ${winType === '쯔모' ? 'border-[#2E7D32] bg-[#2E7D32] text-white' : 'bg-white text-gray-400 border-gray-100'}`}>쯔모</button><button onClick={() => handleWinTypeChange('론')} className={`flex-1 py-3 rounded-xl font-bold border-2 ${winType === '론' ? 'border-[#2E7D32] bg-[#2E7D32] text-white' : 'bg-white text-gray-400 border-gray-100'}`}>론</button></div><div className="flex gap-2"><button onClick={() => setMenzen('멘젠')} className={`flex-1 py-3 rounded-xl font-bold border-2 ${menzen === '멘젠' ? 'border-[#2E7D32] bg-[#2E7D32] text-white' : 'bg-white text-gray-400 border-gray-100'}`}>멘젠</button><button onClick={() => setMenzen('비멘젠')} className={`flex-1 py-3 rounded-xl font-bold border-2 ${menzen === '비멘젠' ? 'border-[#2E7D32] bg-[#2E7D32] text-white' : 'bg-white text-gray-400 border-gray-100'}`}>비멘젠 (울음)</button></div></section>
+                <section className="space-y-3"><h3 className="font-bold text-base text-gray-800 border-b pb-1">화료 형태</h3><div className="flex gap-2"><button onClick={() => handleWinTypeChange('쯔모')} className={`flex-1 py-3 rounded-xl font-bold border-2 ${winType === '쯔모' ? 'border-[#2E7D32] bg-[#2E7D32] text-white' : 'bg-white text-gray-400 border-gray-100'}`}>쯔모</button><button onClick={() => handleWinTypeChange('론')} className={`flex-1 py-3 rounded-xl font-bold border-2 ${winType === '론' ? 'border-[#2E7D32] bg-[#2E7D32] text-white' : 'bg-white text-gray-400 border-gray-100'}`}>론</button></div><div className="flex gap-2"><button onClick={() => setMenzen('멘젠')} className={`flex-1 py-3 rounded-xl font-bold border-2 ${menzen === '멘젠' ? 'border-[#2E7D32] bg-[#2E7D32] text-white' : 'bg-white text-gray-400 border-gray-100'}`}>멘젠</button><button onClick={() => setMenzen('비멘젠')} className={`flex-1 py-3 rounded-xl font-bold border-2 ${menzen === '비멘젠' ? 'border-[#2E7D32] bg-[#2E7D32] text-white' : 'bg-white text-gray-400 border-gray-100'}`}>비멘젠</button></div></section>
                 <section className="space-y-2"><div className="flex justify-between items-end"><h3 className="font-bold text-base text-gray-800">화료자 / 방총자</h3><p className="text-[10px] text-gray-400 font-medium">클릭: 화료 / 더블클릭: 방총</p></div><div className="grid grid-cols-2 gap-2">{players.map((player, index) => (<button key={index} onTouchStart={() => handlePlayerTouchStart(index)} onTouchEnd={handlePlayerTouchEnd} onDoubleClick={() => handlePlayerDoubleClick(index)} onClick={() => handlePlayerClick(index)} className={`relative h-14 rounded-xl font-bold text-base transition-all border-2 select-none ${winner === index ? 'bg-[#2E7D32] border-[#2E7D32] text-white shadow-inner' : loser === index ? 'bg-orange-500 border-orange-500 text-white shadow-inner' : 'bg-white border-gray-200 text-gray-800'}`}>{winner === index && <span className="absolute top-1 left-2 text-[9px] bg-white text-[#2E7D32] px-1 rounded font-black">화료</span>}{loser === index && <span className="absolute top-1 left-2 text-[9px] bg-white text-orange-600 px-1 rounded font-black">방총</span>}{player}</button>))}</div></section>
                 <section className="space-y-2"><h3 className="font-bold text-base text-gray-800">대기 형태</h3><div className="grid grid-cols-3 gap-2">{['양면', '샤보', '간짱', '변짱', '단기', '특수대기'].map(t => <button key={t} onClick={() => setWaitType(t)} className={`p-2.5 rounded-xl text-center text-sm font-bold border-2 ${waitType === t ? 'border-[#2E7D32] bg-[#2E7D32] text-white' : 'bg-white border-gray-100 text-gray-600'}`}>{t}</button>)}</div></section>
                 <section className="space-y-4"><div className="flex justify-between items-end border-b pb-1"><div className="flex items-center gap-2"><h3 className="font-bold text-base text-gray-800">역 선택</h3><span className="text-[10px] text-orange-500 bg-orange-50 px-1.5 py-0.5 rounded border border-orange-200">더블클릭: 후로 감소</span></div><span className="text-xs font-bold text-[#2E7D32]">선택됨: {selectedYaku.length}개</span></div>
                   {Object.entries(yakuData).map(([category, yakus]) => (<div key={category} className="space-y-1.5"><h4 className="font-bold text-[#2E7D32] text-xs">{category}</h4><div className="grid grid-cols-3 gap-1.5">{yakus.map(yaku => { if (activeTab === '3인' && yaku === '삼색동순') return null; const isSelected = selectedYaku.includes(yaku); const isDecreased = furoDecreased.includes(yaku); const canDecrease = targetFuroYaku.includes(yaku); return (<button key={yaku} onClick={() => toggleYaku(yaku)} onTouchStart={() => canDecrease && handleYakuTouchStart(yaku)} onTouchEnd={() => canDecrease && handleYakuTouchEnd()} onDoubleClick={() => canDecrease && handleYakuDoubleClick(yaku)} className={`relative p-2 rounded-lg text-xs font-bold border transition-colors select-none ${isSelected ? 'bg-green-50 border-[#2E7D32] text-[#2E7D32] shadow-sm' : 'bg-white border-gray-200 text-gray-600'}`}>{isSelected && isDecreased && <span className="absolute -top-2 left-1 text-[8px] bg-orange-100 border border-orange-400 text-orange-600 px-1 rounded shadow-sm">후로 감소 (-1)</span>}{yaku}</button>);})}</div></div>))}
                 </section>
                 <section className="space-y-3"><h3 className="font-bold text-base text-gray-800 border-b pb-1">도라 / 부수 / 판수 (자동계산)</h3>
-                  <div className="grid grid-cols-2 gap-3 bg-white p-3 rounded-xl border border-gray-100"><div className="flex justify-between items-center"><span className="font-bold text-amber-600 text-sm">도라</span><div className="flex items-center gap-2"><button onClick={() => setDora(Math.max(0, dora - 1))} className="w-6 h-6 bg-gray-100 rounded font-bold">-</button><span className="w-4 text-center font-bold">{dora}</span><button onClick={() => setDora(dora + 1)} className="w-6 h-6 bg-gray-100 rounded font-bold">+</button></div></div><div className="flex justify-between items-center"><span className="font-bold text-amber-600 text-sm">아카</span><div className="flex items-center gap-2"><button onClick={() => setAka(Math.max(0, aka - 1))} className="w-6 h-6 bg-gray-100 rounded font-bold">-</button><span className="w-4 text-center font-bold">{aka}</span><button onClick={() => setAka(aka + 1)} className="w-6 h-6 bg-gray-100 rounded font-bold">+</button></div></div><div className="flex justify-between items-center"><span className="font-bold text-amber-600 text-sm">우라</span><div className="flex items-center gap-2"><button onClick={() => setUra(Math.max(0, ura - 1))} className="w-6 h-6 bg-gray-100 rounded font-bold">-</button><span className="w-4 text-center font-bold">{ura}</span><button onClick={() => setUra(ura + 1)} className="w-6 h-6 bg-gray-100 rounded font-bold">+</button></div></div>{activeTab === '3인' && (<div className="flex justify-between items-center"><span className="font-bold text-amber-600 text-sm">북</span><div className="flex items-center gap-2"><button onClick={() => setPei(Math.max(0, pei - 1))} className="w-6 h-6 bg-gray-100 rounded font-bold">-</button><span className="w-4 text-center font-bold">{pei}</span><button onClick={() => setPei(pei + 1)} className="w-6 h-6 bg-gray-100 rounded font-bold">+</button></div></div>)}</div>
+                  <div className="grid grid-cols-2 gap-3 bg-white p-3 rounded-xl border border-gray-100"><div className="flex justify-between items-center"><span className="font-bold text-amber-600 text-sm">도라</span><div className="flex items-center gap-2"><button onClick={() => setDora(Math.max(0, dora - 1))} className="w-6 h-6 bg-gray-100 rounded font-bold">-</button><span className="w-4 text-center font-bold">{dora}</span><button onClick={() => setDora(dora + 1)} className="w-6 h-6 bg-gray-100 rounded font-bold">+</button></div></div><div className="flex justify-between items-center"><span className="font-bold text-amber-600 text-sm">적도라</span><div className="flex items-center gap-2"><button onClick={() => setAka(Math.max(0, aka - 1))} className="w-6 h-6 bg-gray-100 rounded font-bold">-</button><span className="w-4 text-center font-bold">{aka}</span><button onClick={() => setAka(aka + 1)} className="w-6 h-6 bg-gray-100 rounded font-bold">+</button></div></div><div className="flex justify-between items-center"><span className="font-bold text-amber-600 text-sm">뒷도라</span><div className="flex items-center gap-2"><button onClick={() => setUra(Math.max(0, ura - 1))} className="w-6 h-6 bg-gray-100 rounded font-bold">-</button><span className="w-4 text-center font-bold">{ura}</span><button onClick={() => setUra(ura + 1)} className="w-6 h-6 bg-gray-100 rounded font-bold">+</button></div></div>{activeTab === '3인' && (<div className="flex justify-between items-center"><span className="font-bold text-amber-600 text-sm">북</span><div className="flex items-center gap-2"><button onClick={() => setPei(Math.max(0, pei - 1))} className="w-6 h-6 bg-gray-100 rounded font-bold">-</button><span className="w-4 text-center font-bold">{pei}</span><button onClick={() => setPei(pei + 1)} className="w-6 h-6 bg-gray-100 rounded font-bold">+</button></div></div>)}</div>
                   <div className="flex gap-3"><div className="flex-1 flex justify-between p-3 bg-white rounded-xl border border-gray-100 items-center"><span className="font-bold text-[#2E7D32] text-sm">부수</span><div className="flex items-center gap-2"><button onClick={() => setFu(Math.max(20, fu - 10))} className="bg-gray-100 w-8 h-8 rounded font-bold">-</button><span className="font-bold text-lg w-6 text-center">{fu}</span><button onClick={() => setFu(Math.min(110, fu + 10))} className="bg-gray-100 w-8 h-8 rounded font-bold">+</button></div></div><div className="flex-1 flex justify-between p-3 bg-green-50 rounded-xl border border-green-200 items-center relative"><span className="absolute -top-2 left-2 bg-green-200 text-green-800 text-[9px] px-1 rounded font-bold">자동계산</span><span className="font-bold text-[#2E7D32] text-sm">판수</span><div className="flex items-center gap-2"><button onClick={() => setHan(Math.max(1, han - 1))} className="bg-white w-8 h-8 rounded font-bold shadow-sm">-</button><span className="font-bold text-xl w-6 text-center text-[#2E7D32]">{han}</span><button onClick={() => setHan(han + 1)} className="bg-white w-8 h-8 rounded font-bold shadow-sm">+</button></div></div></div>
                   <input type="number" inputMode="numeric" placeholder="화료 점수 직접 입력 (선택사항, 예: 8000)" value={score} onChange={(e) => setScore(e.target.value)} className="w-full p-3 rounded-xl border border-gray-200 bg-white font-bold text-sm focus:outline-none focus:border-[#2E7D32]" />
                 </section>
               </>
             ) : recordMode === '유국' ? (
               <>
-                <section className="space-y-3"><div className="flex justify-between items-end border-b pb-1"><h3 className="font-bold text-base text-gray-800">텐파이 플레이어</h3><p className="text-[10px] text-gray-400">선택 안하면 전원 노텐</p></div><div className="grid grid-cols-2 gap-2">{players.map((player, index) => <button key={`tenpai-${index}`} onClick={() => toggleTenpai(index)} disabled={abortiveType !== null} className={`h-14 rounded-xl font-bold text-base transition-all border-2 select-none ${tenpaiPlayers.includes(index) ? 'bg-[#2E7D32] border-[#2E7D32] text-white shadow-inner' : 'bg-white border-gray-200 text-gray-800 disabled:opacity-50'}`}>{player}</button>)}</div></section>
+                <section className="space-y-3"><div className="flex justify-between items-end border-b pb-1"><h3 className="font-bold text-base text-gray-800">텐파이 플레이어</h3><p className="text-[10px] text-gray-400">선택 안하면 전원 노텐</p></div><div className="grid grid-cols-2 gap-2">{players.map((player, index) => <button key={`tenpai-${index}`} onClick={() => toggleTenpai(index)} disabled={abortiveType !== null} className={`h-12 rounded-xl font-bold text-sm transition-all border-2 select-none ${tenpaiPlayers.includes(index) ? 'bg-[#2E7D32] border-[#2E7D32] text-white shadow-inner' : 'bg-white border-gray-200 text-gray-800 disabled:opacity-50'}`}>{player}</button>)}</div></section>
                 <section className="space-y-3"><div className="flex justify-between items-end border-b pb-1"><h3 className="font-bold text-base text-gray-800">유국만관 발생</h3></div><div className="grid grid-cols-2 gap-2">{players.map((player, index) => <button key={`nagashi-${index}`} onClick={() => toggleNagashi(index)} disabled={abortiveType !== null} className={`h-12 rounded-xl font-bold text-sm transition-all border-2 select-none ${nagashiMangan.includes(index) ? 'bg-red-500 border-red-500 text-white shadow-inner' : 'bg-white border-gray-200 text-gray-600 disabled:opacity-50'}`}>{player}</button>)}</div></section>
-                <section className="space-y-3"><div className="flex justify-between items-end border-b pb-1"><h3 className="font-bold text-base text-gray-800">도중유국 (선택)</h3></div><div className="grid grid-cols-2 gap-2">{abortiveDraws.map(type => <button key={type} onClick={() => toggleAbortive(type)} className={`p-3 rounded-xl text-center font-bold text-sm border-2 transition-colors ${abortiveType === type ? 'bg-gray-700 border-gray-700 text-white shadow-inner' : 'bg-white border-gray-200 text-gray-600 hover:border-gray-300'}`}>{type}</button>)}</div></section>
+                <section className="space-y-3"><div className="flex justify-between items-end border-b pb-1"><h3 className="font-bold text-base text-gray-800">도중유국 (선택)</h3></div><div className="grid grid-cols-2 gap-2">{abortiveDraws.map(type => <button key={type} onClick={() => toggleAbortive(type)} className={`h-12 rounded-xl text-center font-bold text-sm border-2 transition-colors ${abortiveType === type ? 'bg-gray-700 border-gray-700 text-white shadow-inner' : 'bg-white border-gray-200 text-gray-600 hover:border-gray-300'}`}>{type}</button>)}</div></section>
               </>
             ) : (
               <>
                 <section className="space-y-3"><div className="flex justify-between items-end border-b pb-1"><h3 className="font-bold text-base text-red-600">촌보 발생자 선택</h3></div><div className="grid grid-cols-2 gap-2">{players.map((player, index) => <button key={`chombo-${index}`} onClick={() => setChomboPlayer(index)} className={`h-14 rounded-xl font-bold text-base transition-all border-2 select-none ${chomboPlayer === index ? 'bg-red-500 border-red-500 text-white shadow-inner' : 'bg-white border-gray-200 text-gray-800'}`}>{player}</button>)}</div></section>
-                <section className="space-y-3"><div className="flex justify-between items-end border-b pb-1"><h3 className="font-bold text-base text-gray-800">처리 방식</h3></div><div className="flex flex-col gap-2">{chomboTypes.map(type => <button key={type} onClick={() => setChomboType(type)} className={`p-4 rounded-xl text-left font-bold text-sm border-2 transition-colors ${chomboType === type ? 'bg-gray-100 border-gray-400 text-gray-800' : 'bg-white border-gray-100 text-gray-500'}`}>{type}</button>)}</div></section>
               </>
             )}
             <section className="pt-4 border-t border-gray-200"><textarea placeholder="해당 국에 대한 메모나 코멘트를 자유롭게 적어주세요. (선택)" value={roundComment} onChange={(e) => setRoundComment(e.target.value)} className="w-full p-3 rounded-xl border border-gray-200 bg-white text-sm focus:outline-none focus:border-[#2E7D32] h-20 resize-none"></textarea></section>
