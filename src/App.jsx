@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { Gamepad2, Plus, List, BarChart2, Trophy, ChevronLeft, Check, Trash2, ShieldAlert, Users, X, Flag, Edit } from 'lucide-react';
-import { db } from './firebase'; // 우리가 만든 서버 설정 불러오기
-import { doc, setDoc, onSnapshot } from 'firebase/firestore'; // 서버 통신 함수들
+import { db } from './firebase'; 
+import { collection, doc, setDoc, deleteDoc, onSnapshot, query, orderBy } from 'firebase/firestore'; 
 
 const yakuData = {
   '1판 역': ['리치', '일발', '멘젠쯔모', '탕야오', '핑후', '이페코', '백', '발', '중', '자풍패', '장풍패', '해저로월', '하저로어', '영상개화', '창깡'],
@@ -19,29 +19,19 @@ function App() {
   const [activeTab, setActiveTab] = useState('4인');
   const [activeNav, setActiveNav] = useState('기록');
   
-  // --- 🌟 Firebase 실시간 데이터베이스 연동 ---
+  // --- 🌟 Firebase 실시간 컬렉션 연동 ---
   const [games, setGames] = useState([]); 
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    // 서버의 'mahjong/all_games' 문서를 실시간으로 감시합니다.
-    const unsub = onSnapshot(doc(db, 'mahjong', 'all_games'), (docSnap) => {
-      if (docSnap.exists()) setGames(docSnap.data().games || []);
-      else setGames([]);
+    // 'games' 컬렉션의 문서들을 시간순으로 가져옵니다.
+    const q = query(collection(db, 'games'), orderBy('id', 'desc'));
+    const unsub = onSnapshot(q, (snapshot) => {
+      setGames(snapshot.docs.map(doc => doc.data()));
       setIsLoading(false);
     });
-    return () => unsub(); // 앱이 꺼질 때 연결 해제
+    return () => unsub();
   }, []);
-
-  // 서버에 데이터를 덮어쓰는(저장하는) 함수
-  const syncGamesToDB = async (newGames) => {
-    try {
-      await setDoc(doc(db, 'mahjong', 'all_games'), { games: newGames });
-    } catch (e) {
-      console.error("서버 저장 실패:", e);
-      alert("서버 저장에 실패했습니다. 인터넷 연결을 확인해주세요.");
-    }
-  };
 
   const [selectedGameId, setSelectedGameId] = useState(null); 
   const [isNewGameModalOpen, setIsNewGameModalOpen] = useState(false);
@@ -63,37 +53,49 @@ function App() {
   const players = currentGame ? currentGame.players : [];
   const displayedGames = games.filter(g => g.type === activeTab);
 
+  // 현재 대국 요약 정보
   const totalRecords = records.length;
   const winRecords = records.filter(r => r.type === '화료');
   const tsumoCount = winRecords.filter(r => r.winType === '쯔모').length;
   const ronCount = winRecords.filter(r => r.winType === '론').length;
   const avgHan = winRecords.length > 0 ? (winRecords.reduce((acc, r) => acc + r.han, 0) / winRecords.length).toFixed(1) : 0;
 
+  // --- 이벤트 핸들러 ---
   const playerTimerRef = useRef(null);
   const handlePlayerTouchStart = (index) => { playerTimerRef.current = setTimeout(() => { if (winType === '론') { setLoser(index); if (winner === index) setWinner(null); } }, 500); };
   const handlePlayerTouchEnd = () => { if (playerTimerRef.current) clearTimeout(playerTimerRef.current); };
   const handlePlayerDoubleClick = (index) => { if (winType === '론') { setLoser(index); if (winner === index) setWinner(null); } };
   const handlePlayerClick = (index) => { setWinner(index); if (loser === index) setLoser(null); };
   const handleWinTypeChange = (type) => { setWinType(type); if (type === '쯔모') setLoser(null); };
+
   const yakuTimerRef = useRef(null);
   const toggleYaku = (yaku) => setSelectedYaku(prev => prev.includes(yaku) ? prev.filter(y => y !== yaku) : [...prev, yaku]);
   const toggleFuroDecrease = (yaku) => { setFuroDecreased(prev => prev.includes(yaku) ? prev.filter(y => y !== yaku) : [...prev, yaku]); setSelectedYaku(prev => prev.includes(yaku) ? prev : [...prev, yaku]); };
   const handleYakuTouchStart = (yaku) => { if (!targetFuroYaku.includes(yaku)) return; yakuTimerRef.current = setTimeout(() => toggleFuroDecrease(yaku), 500); };
   const handleYakuTouchEnd = () => { if (yakuTimerRef.current) clearTimeout(yakuTimerRef.current); };
   const handleYakuDoubleClick = (yaku) => { if (!targetFuroYaku.includes(yaku)) return; toggleFuroDecrease(yaku); };
+
   const toggleTenpai = (index) => { setTenpaiPlayers(prev => prev.includes(index) ? prev.filter(i => i !== index) : [...prev, index]); setAbortiveType(null); };
   const toggleNagashi = (index) => setNagashiMangan(prev => prev.includes(index) ? prev.filter(i => i !== index) : [...prev, index]);
   const toggleAbortive = (type) => { setAbortiveType(prev => prev === type ? null : type); if (abortiveType !== type) setTenpaiPlayers([]); };
 
-  const handleCreateNewGame = () => {
+  // --- 💾 DB 액션 ---
+  const handleCreateNewGame = async () => {
     if (activeTab === '4인' && (!playerE || !playerS || !playerW || !playerN)) return alert("모든 플레이어 이름을 입력해주세요!");
     if (activeTab === '3인' && (!playerE || !playerS || !playerW)) return alert("모든 플레이어 이름을 입력해주세요!");
-    const newGame = { id: Date.now(), date: new Date().toLocaleDateString('ko-KR', { year: 'numeric', month: '2-digit', day: '2-digit' }).replace(/\./g, '.').slice(0, -1), type: activeTab, players: activeTab === '4인' ? [playerE, playerS, playerW, playerN] : [playerE, playerS, playerW], rounds: [], status: '진행중', finalResults: null };
-    syncGamesToDB([newGame, ...games]); // 서버에 동기화
-    setIsNewGameModalOpen(false); setSelectedGameId(newGame.id); setPlayerE(''); setPlayerS(''); setPlayerW(''); setPlayerN('');
+    const newGame = { 
+      id: Date.now(), 
+      date: new Date().toLocaleDateString('ko-KR', { year: 'numeric', month: '2-digit', day: '2-digit' }).replace(/\./g, '.').slice(0, -1), 
+      type: activeTab, 
+      players: activeTab === '4인' ? [playerE, playerS, playerW, playerN] : [playerE, playerS, playerW], 
+      rounds: [], status: '진행중', finalResults: null 
+    };
+    await setDoc(doc(db, 'games', newGame.id.toString()), newGame);
+    setIsNewGameModalOpen(false); setSelectedGameId(newGame.id); setActiveNav('기록'); 
+    setPlayerE(''); setPlayerS(''); setPlayerW(''); setPlayerN('');
   };
 
-  const handleSaveRound = () => {
+  const handleSaveRound = async () => {
     let newRound = { id: Date.now(), wind, roundNum, honba, kyotaku, type: recordMode };
     if (recordMode === '화료') {
       if (winner === null) return alert("화료자를 선택해주세요!");
@@ -102,17 +104,17 @@ function App() {
     } else {
       newRound = { ...newRound, tenpaiPlayers: tenpaiPlayers.map(i => players[i]), nagashiMangan: nagashiMangan.map(i => players[i]), abortiveType };
     }
-    const updatedGames = games.map(game => game.id === selectedGameId ? { ...game, rounds: [newRound, ...game.rounds] } : game);
-    syncGamesToDB(updatedGames); // 서버에 동기화
+    const updatedGame = { ...currentGame, rounds: [newRound, ...currentGame.rounds] };
+    await setDoc(doc(db, 'games', selectedGameId.toString()), updatedGame);
     setIsRoundModalOpen(false); setWinner(null); setLoser(null); setSelectedYaku([]); setFuroDecreased([]); setDora(0); setAka(0); setUra(0); setPei(0); setTenpaiPlayers([]); setNagashiMangan([]); setAbortiveType(null);
   };
 
-  const handleDeleteRound = (roundId) => { 
-    if(confirm("이 국의 기록을 삭제하시겠습니까?")) syncGamesToDB(games.map(game => game.id === selectedGameId ? { ...game, rounds: game.rounds.filter(r => r.id !== roundId) } : game)); 
+  const handleDeleteRound = async (roundId) => { 
+    if(confirm("이 국의 기록을 삭제하시겠습니까?")) await setDoc(doc(db, 'games', selectedGameId.toString()), { ...currentGame, rounds: currentGame.rounds.filter(r => r.id !== roundId) });
   };
-  const handleDeleteGame = (e, gameId) => { 
+  const handleDeleteGame = async (e, gameId) => { 
     e.stopPropagation(); 
-    if(confirm("이 대국의 전체 기록을 삭제하시겠습니까? 복구할 수 없습니다.")) { syncGamesToDB(games.filter(g => g.id !== gameId)); if(selectedGameId === gameId) setSelectedGameId(null); } 
+    if(confirm("이 대국의 전체 기록을 삭제하시겠습니까?")) { await deleteDoc(doc(db, 'games', gameId.toString())); if(selectedGameId === gameId) setSelectedGameId(null); } 
   };
 
   const handleOpenEndGame = () => {
@@ -121,13 +123,11 @@ function App() {
     setIsEndGameModalOpen(true);
   };
 
-  const updateFinalScore = (index, value) => { const newScores = [...finalScores]; newScores[index].score = value; setFinalScores(newScores); };
-
-  const handleConfirmEndGame = () => {
+  const handleConfirmEndGame = async () => {
     if (finalScores.some(f => f.score === '')) return alert("모든 플레이어의 소점을 입력해주세요!");
     const totalScore = finalScores.reduce((sum, f) => sum + parseInt(f.score), 0);
     const expectedTotal = players.length === 4 ? 100000 : 105000;
-    if (totalScore !== expectedTotal) return alert(`총합이 맞지 않습니다!\n(필요 점수: ${expectedTotal}점 / 현재 총합: ${totalScore}점)`);
+    if (totalScore !== expectedTotal) return alert(`총합이 맞지 않습니다!\n(필요: ${expectedTotal}점 / 현재: ${totalScore}점)`);
 
     const scoresWithIndex = finalScores.map((f, index) => ({ score: parseInt(f.score), index }));
     scoresWithIndex.sort((a, b) => b.score !== a.score ? b.score - a.score : a.index - b.index);
@@ -139,7 +139,8 @@ function App() {
       else pt = (item.score - 40000) / 1000 + [45, 0, -30][rank];
       calculatedResults[item.index] = { score: item.score, pt: parseFloat(pt.toFixed(1)) };
     });
-    syncGamesToDB(games.map(game => game.id === selectedGameId ? { ...game, status: '종료', finalResults: calculatedResults } : game));
+    
+    await setDoc(doc(db, 'games', selectedGameId.toString()), { ...currentGame, status: '종료', finalResults: calculatedResults });
     setIsEndGameModalOpen(false);
   };
 
@@ -150,19 +151,70 @@ function App() {
       const sorted = game.finalResults.map((r, i) => ({ ...r, player: game.players[i] })).sort((a, b) => b.score - a.score);
       sorted.forEach((res, rank) => {
         const p = res.player;
-        if (!stats[p]) stats[p] = { name: p, playCount: 0, totalPt: 0, ranks: [0, 0, 0, 0], maxScore: -999999, minScore: 999999, tobi: 0 };
+        if (!stats[p]) stats[p] = { name: p, playCount: 0, totalPt: 0, ranks: [0, 0, 0, 0], tobi: 0 };
         stats[p].playCount += 1;
         stats[p].totalPt += res.pt;
         stats[p].ranks[rank] += 1;
-        if (res.score > stats[p].maxScore) stats[p].maxScore = res.score;
-        if (res.score < stats[p].minScore) stats[p].minScore = res.score;
         if (res.score < 0) stats[p].tobi += 1;
       });
     });
     return Object.values(stats).sort((a, b) => b.totalPt - a.totalPt);
   };
 
+  // --- 📈 개인 통계 데이터 계산 로직 ---
+  const getPersonalStats = () => {
+    const stats = {};
+    const validGames = games.filter(g => g.type === activeTab && g.status === '종료');
+    
+    validGames.forEach(game => {
+      // 대국에 참여한 모든 플레이어 초기화
+      game.players.forEach(p => {
+        if (!stats[p]) stats[p] = { name: p, roundsPlayed: 0, winCount: 0, dealInCount: 0, furoWinCount: 0, totalHan: 0, yakus: {}, waitTypes: {} };
+      });
+
+      game.rounds.forEach(round => {
+        if(round.type === '화료') {
+          // 해당 국에 참여한 4명(또는 3명)의 총 국수 증가
+          game.players.forEach(p => stats[p].roundsPlayed += 1);
+
+          // 화료자 통계
+          const winnerStat = stats[round.winner];
+          winnerStat.winCount += 1;
+          winnerStat.totalHan += round.han;
+          if(round.menzen === '비멘젠') winnerStat.furoWinCount += 1;
+          
+          // 대기 형태 누적
+          winnerStat.waitTypes[round.waitType] = (winnerStat.waitTypes[round.waitType] || 0) + 1;
+          
+          // 역 누적
+          round.selectedYaku.forEach(yaku => {
+            winnerStat.yakus[yaku] = (winnerStat.yakus[yaku] || 0) + 1;
+          });
+
+          // 방총자 통계
+          if(round.winType === '론' && round.loser) {
+            stats[round.loser].dealInCount += 1;
+          }
+        } else if (round.type === '유국') {
+          game.players.forEach(p => stats[p].roundsPlayed += 1);
+        }
+      });
+    });
+
+    // 계산된 통계를 배열로 변환
+    return Object.values(stats).map(s => ({
+      ...s,
+      winRate: s.roundsPlayed > 0 ? ((s.winCount / s.roundsPlayed) * 100).toFixed(1) : 0,
+      dealInRate: s.roundsPlayed > 0 ? ((s.dealInCount / s.roundsPlayed) * 100).toFixed(1) : 0,
+      furoRate: s.winCount > 0 ? ((s.furoWinCount / s.winCount) * 100).toFixed(1) : 0,
+      avgHan: s.winCount > 0 ? (s.totalHan / s.winCount).toFixed(1) : 0,
+      // 가장 많이 쓴 역 Top 3 추출
+      topYakus: Object.entries(s.yakus).sort((a,b) => b[1] - a[1]).slice(0, 3)
+    })).sort((a,b) => b.winRate - a.winRate); // 기본 정렬: 화료율 순
+  };
+
   const rankingData = getRankingData();
+  const personalStats = getPersonalStats();
 
   if (isLoading) return <div className="h-screen w-full flex items-center justify-center bg-[#F5F5DC] text-[#2E7D32] font-bold">서버 연결 중...</div>;
 
@@ -184,7 +236,7 @@ function App() {
         )}
       </header>
 
-      {/* 탭 공통 UI */}
+      {/* 상단 탭 공통 UI */}
       {(selectedGameId === null || activeNav !== '기록') && (
         <div className="flex bg-white border-b border-gray-200 shadow-sm z-10 sticky top-0">
           <button className={`flex-1 py-3 text-center font-bold flex justify-center items-center gap-2 border-b-2 ${activeTab === '4인' ? 'border-[#2E7D32] text-[#2E7D32]' : 'border-transparent text-gray-500'}`} onClick={() => setActiveTab('4인')}>
@@ -199,7 +251,7 @@ function App() {
       <main className="flex-1 overflow-y-auto flex flex-col relative pb-24">
         
         {/* ========================================= */}
-        {/* 화면 1: 대국 기록 탭 (메인 리스트) */}
+        {/* 화면 1: 대국 기록 메인 리스트 */}
         {/* ========================================= */}
         {activeNav === '기록' && selectedGameId === null && (
           <div className="flex-1 flex flex-col p-4 space-y-4">
@@ -251,7 +303,7 @@ function App() {
         )}
 
         {/* ========================================= */}
-        {/* 화면 1-B: 대국 상세 화면 */}
+        {/* 화면 1-B: 대국 상세 화면 (기록 탭) */}
         {/* ========================================= */}
         {activeNav === '기록' && selectedGameId !== null && currentGame && (
           <div className="flex-1 flex flex-col">
@@ -264,11 +316,9 @@ function App() {
 
             <div className="p-4 pb-0">
               <div className="bg-[#2E7D32] bg-opacity-5 p-3 rounded-xl border border-green-100 flex justify-between items-center text-sm font-bold shadow-inner">
-                 {players.map((p, i) => (
-                   <div key={i} className={`text-center flex-1 ${i>0 && 'border-l border-green-200 border-opacity-50'}`}>
-                     <span className={`block text-[10px] mb-0.5 ${i===0?'text-[#2E7D32]':i===1?'text-orange-500':i===2?'text-gray-500':'text-blue-600'}`}>{['東(동)','南(남)','西(서)','北(북)'][i]}</span>{p}
-                   </div>
-                 ))}
+                {players.map((p, i) => (
+                  <div key={i} className={`text-center flex-1 ${i>0 && 'border-l border-green-200 border-opacity-50'}`}><span className={`block text-[10px] mb-0.5 ${i===0?'text-[#2E7D32]':i===1?'text-orange-500':i===2?'text-gray-500':'text-blue-600'}`}>{['東(동)','南(남)','西(서)','北(북)'][i]}</span>{p}</div>
+                ))}
               </div>
 
               {currentGame.status === '종료' && currentGame.finalResults && (
@@ -277,15 +327,7 @@ function App() {
                   <h3 className="font-bold text-lg mb-4 flex items-center gap-2"><Trophy size={20} className="text-yellow-400"/> 최종 대국 결과</h3>
                   <div className="space-y-2">
                     {players.map((p, i) => (
-                      <div key={i} className="flex justify-between items-center py-2 border-b border-gray-700 last:border-0">
-                        <span className="font-bold">{p}</span>
-                        <div className="flex items-center gap-4 text-right">
-                          <span className="w-20 font-medium text-gray-300">{Number(currentGame.finalResults[i].score).toLocaleString()}점</span>
-                          <span className={`w-14 font-black text-lg ${parseFloat(currentGame.finalResults[i].pt) > 0 ? 'text-green-400' : parseFloat(currentGame.finalResults[i].pt) < 0 ? 'text-red-400' : 'text-gray-400'}`}>
-                            {parseFloat(currentGame.finalResults[i].pt) > 0 ? '+' : ''}{currentGame.finalResults[i].pt}
-                          </span>
-                        </div>
-                      </div>
+                      <div key={i} className="flex justify-between items-center py-2 border-b border-gray-700 last:border-0"><span className="font-bold">{p}</span><div className="flex items-center gap-4 text-right"><span className="w-20 font-medium text-gray-300">{Number(currentGame.finalResults[i].score).toLocaleString()}점</span><span className={`w-14 font-black text-lg ${parseFloat(currentGame.finalResults[i].pt) > 0 ? 'text-green-400' : parseFloat(currentGame.finalResults[i].pt) < 0 ? 'text-red-400' : 'text-gray-400'}`}>{parseFloat(currentGame.finalResults[i].pt) > 0 ? '+' : ''}{currentGame.finalResults[i].pt}</span></div></div>
                     ))}
                   </div>
                 </div>
@@ -308,7 +350,6 @@ function App() {
                       </div>
                       <button onClick={() => handleDeleteRound(record.id)} className="text-red-400 hover:text-red-600 p-1"><Trash2 size={18} /></button>
                     </div>
-
                     {record.type === '화료' ? (
                       <>
                         <div className="flex items-center gap-3 mb-3"><span className={`font-bold text-sm ${record.winType === '쯔모' ? 'text-[#2E7D32]' : 'text-orange-500'}`}>{record.winType}</span><span className="font-bold text-lg text-gray-800">{record.winner} {record.winType === '론' && <span className="text-gray-400 text-sm font-medium mx-2">← {record.loser}</span>}</span></div>
@@ -335,54 +376,65 @@ function App() {
                 ))
               )}
             </div>
-
             {currentGame.status === '진행중' && (
-              <div className="fixed bottom-20 right-6 z-20">
-                <button onClick={() => setIsRoundModalOpen(true)} className="bg-[#2E7D32] text-white p-4 rounded-full shadow-lg hover:bg-green-800 active:scale-95 transition-transform"><Plus size={28} strokeWidth={3} /></button>
-              </div>
+              <div className="fixed bottom-20 right-6 z-20"><button onClick={() => setIsRoundModalOpen(true)} className="bg-[#2E7D32] text-white p-4 rounded-full shadow-lg hover:bg-green-800 active:scale-95 transition-transform"><Plus size={28} strokeWidth={3} /></button></div>
             )}
           </div>
         )}
 
         {/* ========================================= */}
-        {/* 화면 2: 🏆 랭킹 페이지 */}
+        {/* 화면 2: 📈 개인 통계 (Statistics) 페이지 */}
         {/* ========================================= */}
-        {activeNav === '랭킹' && (
-          <div className="p-4 space-y-3">
-            <h2 className="font-bold text-gray-800 text-lg mb-2 pl-1">누적 우마(PT) 순위</h2>
-            {rankingData.length === 0 ? (
-              <div className="text-center py-20 text-gray-400 font-bold bg-white rounded-2xl shadow-sm border border-gray-100">
-                <Trophy size={48} className="mx-auto mb-4 text-gray-300" />
-                <p>아직 종료된 대국이 없어</p>
-                <p>순위를 매길 수 없습니다.</p>
-              </div>
+        {activeNav === '통계' && (
+          <div className="p-4 space-y-4">
+            <h2 className="font-bold text-gray-800 text-lg mb-2 pl-1">개인 플레이 통계</h2>
+            {personalStats.length === 0 ? (
+              <div className="text-center py-20 text-gray-400 font-bold bg-white rounded-2xl shadow-sm border border-gray-100">아직 종료된 대국 통계가 없습니다.</div>
             ) : (
-              rankingData.map((player, index) => (
-                <div key={player.name} className="bg-white p-4 rounded-[20px] shadow-sm border border-gray-100 flex items-center justify-between animate-in fade-in slide-in-from-bottom-2">
-                  <div className="flex items-center gap-4">
-                    {/* 순위 뱃지 (1,2,3등은 색상 다르게) */}
-                    <div className={`w-10 h-10 rounded-full flex items-center justify-center font-black text-white shadow-inner text-lg
-                      ${index === 0 ? 'bg-yellow-400' : index === 1 ? 'bg-gray-400' : index === 2 ? 'bg-amber-600' : 'bg-gray-200 text-gray-600'}`}>
-                      {index + 1}
-                    </div>
+              personalStats.map(stat => (
+                <div key={stat.name} className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden animate-in fade-in slide-in-from-bottom-2">
+                  <div className="bg-gray-50 p-4 border-b border-gray-100 flex justify-between items-center">
+                    <h3 className="font-bold text-xl text-gray-800">{stat.name}</h3>
+                    <span className="text-xs text-gray-500 font-bold bg-gray-200 px-2 py-1 rounded">{stat.roundsPlayed}국 참여</span>
+                  </div>
+                  
+                  <div className="p-4 grid grid-cols-2 gap-4">
+                    <div className="bg-green-50 p-3 rounded-xl border border-green-100 text-center"><span className="block text-xs text-gray-500 font-bold mb-1">화료율</span><span className="text-xl font-black text-[#2E7D32]">{stat.winRate}%</span></div>
+                    <div className="bg-orange-50 p-3 rounded-xl border border-orange-100 text-center"><span className="block text-xs text-gray-500 font-bold mb-1">방총율</span><span className="text-xl font-black text-orange-500">{stat.dealInRate}%</span></div>
+                    <div className="bg-gray-50 p-3 rounded-xl border border-gray-200 text-center"><span className="block text-xs text-gray-500 font-bold mb-1">평균 타점</span><span className="text-xl font-black text-gray-700">{stat.avgHan}판</span></div>
+                    <div className="bg-blue-50 p-3 rounded-xl border border-blue-100 text-center"><span className="block text-xs text-gray-500 font-bold mb-1">후로율 (울음)</span><span className="text-xl font-black text-blue-600">{stat.furoRate}%</span></div>
+                  </div>
+
+                  <div className="px-4 pb-4 space-y-4">
                     <div>
-                      <h3 className="font-bold text-lg text-gray-800">{player.name}</h3>
-                      <div className="text-[11px] text-gray-500 font-bold mt-0.5 flex gap-2">
-                        <span>{player.playCount}전</span>
-                        <span className="text-gray-300">|</span>
-                        <span>1위 {player.ranks[0]}회</span>
-                        <span className="text-gray-300">|</span>
-                        <span>연대율 {((player.ranks[0] + player.ranks[1]) / player.playCount * 100).toFixed(1)}%</span>
+                      <h4 className="text-xs font-bold text-gray-400 mb-2">선호 대기 형태</h4>
+                      <div className="flex h-3 bg-gray-100 rounded-full overflow-hidden">
+                        {Object.entries(stat.waitTypes).map(([type, count], i) => {
+                          const percent = (count / stat.winCount) * 100;
+                          const colors = ['bg-[#2E7D32]', 'bg-green-500', 'bg-lime-500', 'bg-yellow-500', 'bg-orange-500', 'bg-red-500'];
+                          return <div key={type} style={{width: `${percent}%`}} className={colors[i%colors.length]} title={`${type} ${percent.toFixed(0)}%`}></div>
+                        })}
+                      </div>
+                      <div className="flex flex-wrap gap-2 mt-2">
+                        {Object.entries(stat.waitTypes).sort((a,b)=>b[1]-a[1]).map(([type, count], i) => (
+                          <span key={type} className="text-[10px] font-bold text-gray-500">{type} {((count/stat.winCount)*100).toFixed(0)}%</span>
+                        ))}
                       </div>
                     </div>
-                  </div>
-                  <div className="text-right">
-                    <div className={`text-xl font-black tracking-tighter ${player.totalPt > 0 ? 'text-[#2E7D32]' : player.totalPt < 0 ? 'text-red-500' : 'text-gray-500'}`}>
-                      {player.totalPt > 0 ? '+' : ''}{player.totalPt.toFixed(1)}
-                    </div>
-                    <div className="text-[10px] text-gray-400 font-bold mt-0.5 bg-gray-50 px-2 py-0.5 rounded inline-block">
-                      평균 {(player.totalPt / player.playCount).toFixed(1)}
-                    </div>
+                    
+                    {stat.topYakus.length > 0 && (
+                      <div>
+                        <h4 className="text-xs font-bold text-gray-400 mb-2">자주 쓴 역 TOP 3</h4>
+                        <div className="flex gap-2">
+                          {stat.topYakus.map(([yaku, count], i) => (
+                            <div key={yaku} className="flex-1 bg-gray-50 border border-gray-200 rounded-lg p-2 text-center">
+                              <span className="block text-[11px] font-bold text-gray-600 truncate">{yaku}</span>
+                              <span className="text-sm font-black text-gray-800">{count}회</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               ))
@@ -390,11 +442,36 @@ function App() {
           </div>
         )}
 
+        {/* ========================================= */}
+        {/* 화면 3: 🏆 전체 랭킹 페이지 */}
+        {/* ========================================= */}
+        {activeNav === '랭킹' && (
+          <div className="p-4 space-y-3">
+            <h2 className="font-bold text-gray-800 text-lg mb-2 pl-1">마작 순위</h2>
+            {rankingData.length === 0 ? (
+              <div className="text-center py-20 text-gray-400 font-bold bg-white rounded-2xl shadow-sm border border-gray-100"><Trophy size={48} className="mx-auto mb-4 text-gray-300" /><p>아직 종료된 대국이 없어</p><p>순위를 매길 수 없습니다.</p></div>
+            ) : (
+              rankingData.map((player, index) => (
+                <div key={player.name} className="bg-white p-4 rounded-[20px] shadow-sm border border-gray-100 flex items-center justify-between animate-in fade-in slide-in-from-bottom-2">
+                  <div className="flex items-center gap-4">
+                    <div className={`w-10 h-10 rounded-full flex items-center justify-center font-black text-white shadow-inner text-lg ${index === 0 ? 'bg-yellow-400' : index === 1 ? 'bg-gray-400' : index === 2 ? 'bg-amber-600' : 'bg-gray-200 text-gray-600'}`}>{index + 1}</div>
+                    <div>
+                      <h3 className="font-bold text-lg text-gray-800">{player.name}</h3>
+                      <div className="text-[11px] text-gray-500 font-bold mt-0.5 flex gap-2"><span>{player.playCount}전</span><span className="text-gray-300">|</span><span>1위 {player.ranks[0]}회</span><span className="text-gray-300">|</span><span>연대율 {((player.ranks[0] + player.ranks[1]) / player.playCount * 100).toFixed(1)}%</span></div>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <div className={`text-xl font-black tracking-tighter ${player.totalPt > 0 ? 'text-[#2E7D32]' : player.totalPt < 0 ? 'text-red-500' : 'text-gray-500'}`}>{player.totalPt > 0 ? '+' : ''}{player.totalPt.toFixed(1)}</div>
+                    <div className="text-[10px] text-gray-400 font-bold mt-0.5 bg-gray-50 px-2 py-0.5 rounded inline-block">평균 {(player.totalPt / player.playCount).toFixed(1)}</div>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        )}
       </main>
 
-      {/* --- 모달들 (새 게임, 대국 종료, 국 기록) --- */}
-      {/* 코드 길이를 줄이기 위해 모달 부분은 기존과 완벽하게 동일하게 작동합니다 (위에 이미 작성됨) */}
-      
+      {/* 모달들 */}
       {isEndGameModalOpen && (
         <div className="absolute inset-0 bg-black bg-opacity-60 z-[60] flex flex-col justify-end animate-in fade-in">
           <div className="bg-[#F5F5DC] w-full h-[70%] rounded-t-3xl shadow-2xl flex flex-col animate-in slide-in-from-bottom">
