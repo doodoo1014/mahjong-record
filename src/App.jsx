@@ -20,7 +20,7 @@ function App() {
   const [activeNav, setActiveNav] = useState('기록');
   
   const [games, setGames] = useState([]); 
-  const [seasons, setSeasons] = useState([{ id: 'season_1', name: '시즌 1' }]); 
+  const [seasons, setSeasons] = useState([{ id: 'season_1', name: '시즌 2' }]); 
   const [isLoading, setIsLoading] = useState(true);
 
   const [currentUser, setCurrentUser] = useState(() => {
@@ -43,7 +43,7 @@ function App() {
     const unsubGames = onSnapshot(qGames, (snapshot) => { setGames(snapshot.docs.map(doc => doc.data())); setIsLoading(false); });
     const unsubSeasons = onSnapshot(doc(db, 'settings', 'seasons'), (docSnap) => {
       if (docSnap.exists() && docSnap.data().list) setSeasons(docSnap.data().list);
-      else setDoc(doc(db, 'settings', 'seasons'), { list: [{ id: 'season_1', name: '시즌 1' }] });
+      else setDoc(doc(db, 'settings', 'seasons'), { list: [{ id: 'season_1', name: '시즌 2' }] });
     });
     return () => { unsubGames(); unsubSeasons(); };
   }, []);
