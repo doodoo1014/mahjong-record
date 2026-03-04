@@ -621,7 +621,13 @@ function App() {
                 );
               })
             )}
-            {canWrite && <div className="fixed bottom-20 right-6 z-20"><button onClick={() => setIsNewGameModalOpen(true)} className="bg-[#2E7D32] text-white p-4 rounded-full shadow-lg hover:bg-green-800 active:scale-95 transition-transform"><Plus size={28} strokeWidth={3} /></button></div>}
+            {canWrite && activeTab !== '전체' && (
+              <div className="fixed bottom-20 right-6 z-20">
+                <button onClick={() => setIsNewGameModalOpen(true)} className="bg-[#2E7D32] text-white p-4 rounded-full shadow-lg hover:bg-green-800 active:scale-95 transition-transform">
+                  <Plus size={28} strokeWidth={3} />
+                </button>
+              </div>
+            )}
           </div>
         )}
 
