@@ -20,7 +20,7 @@ function App() {
   const [activeNav, setActiveNav] = useState('기록');
   
   const [games, setGames] = useState([]); 
-  const [seasons, setSeasons] = useState([{ id: 'season_1', name: '시즌 2' }]); 
+  const [seasons, setSeasons] = useState([{ id: 'season_2', name: '시즌 2' }]); 
   const [isLoading, setIsLoading] = useState(true);
 
   const [currentUser, setCurrentUser] = useState(() => {
@@ -43,7 +43,7 @@ function App() {
     const unsubGames = onSnapshot(qGames, (snapshot) => { setGames(snapshot.docs.map(doc => doc.data())); setIsLoading(false); });
     const unsubSeasons = onSnapshot(doc(db, 'settings', 'seasons'), (docSnap) => {
       if (docSnap.exists() && docSnap.data().list) setSeasons(docSnap.data().list);
-      else setDoc(doc(db, 'settings', 'seasons'), { list: [{ id: 'season_1', name: '시즌 2' }] });
+      else setDoc(doc(db, 'settings', 'seasons'), { list: [{ id: 'season_1', name: '시즌 1', startDate: '', endDate: '' }] });
     });
     return () => { unsubGames(); unsubSeasons(); };
   }, []);
@@ -100,13 +100,42 @@ function App() {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedSeason, setSelectedSeason] = useState('all'); 
   const [isSeasonModalOpen, setIsSeasonModalOpen] = useState(false);
+  
+  // 💡 시즌 관리용 확장 상태
   const [newSeasonName, setNewSeasonName] = useState('');
+  const [newSeasonStart, setNewSeasonStart] = useState('');
+  const [newSeasonEnd, setNewSeasonEnd] = useState('');
+  const [editingSeasonId, setEditingSeasonId] = useState(null); // 수정 모드 판별용
 
-  const handleAddSeason = async () => {
-    if (!newSeasonName) return;
-    const newSeasonList = [...seasons, { id: `season_${Date.now()}`, name: newSeasonName }];
+  const handleSaveSeason = async () => {
+    if (!newSeasonName.trim()) return alert("시즌 이름을 입력해주세요.");
+    
+    let newSeasonList;
+    if (editingSeasonId) {
+      // 기존 시즌 수정
+      newSeasonList = seasons.map(s => 
+        s.id === editingSeasonId ? { ...s, name: newSeasonName, startDate: newSeasonStart, endDate: newSeasonEnd } : s
+      );
+    } else {
+      // 새 시즌 추가
+      newSeasonList = [...seasons, { id: `season_${Date.now()}`, name: newSeasonName, startDate: newSeasonStart, endDate: newSeasonEnd }];
+    }
+    
     await setDoc(doc(db, 'settings', 'seasons'), { list: newSeasonList });
-    setNewSeasonName(''); setIsSeasonModalOpen(false);
+    
+    // 입력창 초기화
+    setNewSeasonName(''); setNewSeasonStart(''); setNewSeasonEnd(''); setEditingSeasonId(null);
+  };
+
+  const handleEditSeasonClick = (season) => {
+    setNewSeasonName(season.name);
+    setNewSeasonStart(season.startDate || '');
+    setNewSeasonEnd(season.endDate || '');
+    setEditingSeasonId(season.id);
+  };
+
+  const handleCancelEditSeason = () => {
+    setNewSeasonName(''); setNewSeasonStart(''); setNewSeasonEnd(''); setEditingSeasonId(null);
   };
 
   const displayedGames = games.filter(g => {
@@ -1060,10 +1089,48 @@ function App() {
 
       {isSeasonModalOpen && (
         <div className="absolute inset-0 bg-black bg-opacity-60 z-[70] flex items-center justify-center animate-in fade-in">
-          <div className="bg-white w-11/12 max-w-md rounded-2xl shadow-2xl p-6 relative max-h-[80%] flex flex-col">
-            <button onClick={() => setIsSeasonModalOpen(false)} className="absolute top-4 right-4 text-gray-400 hover:text-gray-600"><X size={20}/></button><h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2"><CalendarPlus size={20}/> 시즌 설정</h2>
-            <div className="flex-1 overflow-y-auto mb-4 space-y-2 border border-gray-100 rounded-xl p-2 bg-gray-50">{seasons.map(s => (<div key={s.id} className="bg-white px-3 py-2 rounded-lg border border-gray-200 font-bold text-gray-700 shadow-sm text-sm">{s.name}</div>))}</div>
-            <div className="flex gap-2"><input type="text" placeholder="새 시즌 이름 (예: 2026 스프링)" value={newSeasonName} onChange={e=>setNewSeasonName(e.target.value)} className="flex-1 p-3 border border-gray-300 rounded-xl focus:outline-none focus:border-[#2E7D32] text-sm font-bold" /><button onClick={handleAddSeason} className="bg-[#2E7D32] text-white font-bold px-4 rounded-xl hover:bg-green-800">추가</button></div>
+          <div className="bg-white w-11/12 max-w-md rounded-2xl shadow-2xl p-5 relative max-h-[90%] flex flex-col">
+            <button onClick={() => {setIsSeasonModalOpen(false); handleCancelEditSeason();}} className="absolute top-4 right-4 text-gray-400 hover:text-gray-600"><X size={20}/></button>
+            <h2 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2"><CalendarPlus size={20}/> 시즌 관리</h2>
+            
+            {/* 등록된 시즌 목록 */}
+            <div className="flex-1 overflow-y-auto mb-4 space-y-2 border border-gray-100 rounded-xl p-2 bg-gray-50 max-h-[40vh]">
+              {seasons.map(s => (
+                <div key={s.id} className="bg-white p-3 rounded-lg border border-gray-200 shadow-sm flex justify-between items-center">
+                  <div>
+                    <div className="font-bold text-gray-800 text-sm">{s.name}</div>
+                    {(s.startDate || s.endDate) && (
+                      <div className="text-[10px] text-gray-500 mt-0.5">{s.startDate || '미정'} ~ {s.endDate || '미정'}</div>
+                    )}
+                  </div>
+                  <button onClick={() => handleEditSeasonClick(s)} className="text-gray-400 hover:text-[#2E7D32] p-1.5"><Edit size={16}/></button>
+                </div>
+              ))}
+            </div>
+
+            {/* 새 시즌 추가 및 수정 폼 */}
+            <div className="bg-gray-50 p-3 rounded-xl border border-gray-200 space-y-3">
+              <h3 className="text-xs font-bold text-gray-600">{editingSeasonId ? '시즌 정보 수정' : '새 시즌 추가'}</h3>
+              <input type="text" placeholder="시즌 이름 (예: 2026 상반기)" value={newSeasonName} onChange={e=>setNewSeasonName(e.target.value)} className="w-full p-2.5 border border-gray-300 rounded-lg focus:outline-none focus:border-[#2E7D32] text-sm font-bold" />
+              
+              <div className="flex gap-2">
+                <div className="flex-1">
+                  <span className="block text-[10px] text-gray-500 mb-1 ml-1 font-bold">시작일</span>
+                  <input type="date" value={newSeasonStart} onChange={e=>setNewSeasonStart(e.target.value)} className="w-full p-2 border border-gray-300 rounded-lg focus:outline-none focus:border-[#2E7D32] text-xs text-gray-700 font-bold bg-white" />
+                </div>
+                <div className="flex-1">
+                  <span className="block text-[10px] text-gray-500 mb-1 ml-1 font-bold">종료일</span>
+                  <input type="date" value={newSeasonEnd} onChange={e=>setNewSeasonEnd(e.target.value)} className="w-full p-2 border border-gray-300 rounded-lg focus:outline-none focus:border-[#2E7D32] text-xs text-gray-700 font-bold bg-white" />
+                </div>
+              </div>
+
+              <div className="flex gap-2 pt-1">
+                {editingSeasonId && <button onClick={handleCancelEditSeason} className="flex-1 bg-gray-200 text-gray-700 font-bold py-2.5 rounded-lg hover:bg-gray-300 text-sm transition-colors">취소</button>}
+                <button onClick={handleSaveSeason} className={`flex-1 text-white font-bold py-2.5 rounded-lg text-sm transition-colors ${editingSeasonId ? 'bg-blue-600 hover:bg-blue-700' : 'bg-[#2E7D32] hover:bg-green-800'}`}>
+                  {editingSeasonId ? '저장' : '추가'}
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}
