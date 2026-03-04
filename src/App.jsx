@@ -208,16 +208,44 @@ function App() {
   const toggleAbortive = (type) => { setAbortiveType(prev => prev === type ? null : type); if (abortiveType !== type) setTenpaiPlayers([]); };
 
   const handleCreateNewGame = async () => {
-    const gameType = activeTab === '전체' ? '4인' : activeTab; // 전체 탭에서 생성 시 4인 기본
+    const gameType = activeTab === '전체' ? '4인' : activeTab;
     if (gameType === '4인' && (!playerE || !playerS || !playerW || !playerN)) return alert("모든 플레이어 이름을 입력해주세요!");
     if (gameType === '3인' && (!playerE || !playerS || !playerW)) return alert("모든 플레이어 이름을 입력해주세요!");
-    const currentSeasonId = selectedSeason === 'all' ? seasons[seasons.length - 1].id : selectedSeason;
+    
+    // 💡 1. 오늘 날짜를 구해서 YYYY-MM-DD 형태로 변환
+    const today = new Date();
+    const todayStr = today.getFullYear() + '-' + String(today.getMonth() + 1).padStart(2, '0') + '-' + String(today.getDate()).padStart(2, '0');
+    
+    // 💡 2. 시즌 목록을 돌면서 오늘 날짜가 포함되는 시즌 찾기
+    let matchedSeasonId = null;
+    for (let i = seasons.length - 1; i >= 0; i--) {
+      const s = seasons[i];
+      if (s.startDate && s.endDate && todayStr >= s.startDate && todayStr <= s.endDate) {
+        matchedSeasonId = s.id;
+        break;
+      }
+    }
+    
+    // 💡 3. 예외 처리: 오늘 날짜가 속한 시즌이 없다면 "프리 시즌"으로 자동 배정
+    if (!matchedSeasonId) {
+      const preSeason = seasons.find(s => s.name === "프리 시즌");
+      if (preSeason) {
+        matchedSeasonId = preSeason.id; // 프리 시즌이 존재하면 프리 시즌으로 쏙!
+      } else {
+        // 혹시 아직 관리자가 '프리 시즌'을 안 만들어뒀을 때 에러가 나지 않도록 방어 (가장 최근 시즌 배정)
+        matchedSeasonId = seasons[seasons.length - 1].id;
+      }
+    }
+
     const newGame = { 
-      id: Date.now(), seasonId: currentSeasonId,
+      id: Date.now(), 
+      seasonId: matchedSeasonId, // 찾은 시즌 ID를 자동 부여
       date: new Date().toLocaleDateString('ko-KR', { year: 'numeric', month: '2-digit', day: '2-digit' }).replace(/\./g, '.').slice(0, -1), 
-      type: gameType, players: gameType === '4인' ? [playerE, playerS, playerW, playerN] : [playerE, playerS, playerW], 
+      type: gameType, 
+      players: gameType === '4인' ? [playerE, playerS, playerW, playerN] : [playerE, playerS, playerW], 
       rounds: [], status: '진행중', finalResults: null 
     };
+    
     await setDoc(doc(db, 'games', newGame.id.toString()), newGame);
     setIsNewGameModalOpen(false); setSelectedGameId(newGame.id); setActiveNav('기록'); 
     setPlayerE(''); setPlayerS(''); setPlayerW(''); setPlayerN('');
