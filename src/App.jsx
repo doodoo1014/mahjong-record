@@ -35,7 +35,7 @@ function App() {
   const [isMasterModalOpen, setIsMasterModalOpen] = useState(false);
   const [allUsers, setAllUsers] = useState([]);
 
-  const canWrite = !!currentUser; 
+  const canWrite = currentUser ? (currentUser.role === 'master' || currentUser.isApproved || currentUser.isApproved === undefined) : false;
   const isAdmin = currentUser?.role === 'admin' || currentUser?.role === 'master';
   const isMaster = currentUser?.role === 'master';
 
@@ -71,11 +71,11 @@ function App() {
     if (!authName.trim() || !/^\d{4}$/.test(authPin)) return alert('이름과 4자리 숫자 PIN을 정확히 입력해주세요.');
     const userRef = doc(db, 'users', authName); const userSnap = await getDoc(userRef);
     if (userSnap.exists()) return alert('이미 존재하는 이름입니다. 로그인해주세요.');
-    let initialRole = 'player'; let isPending = false;
-    if (authName === '마스터') { initialRole = 'master'; alert('최고 관리자(마스터) 계정이 생성되었습니다!'); } 
-    else if (authRoleReq === 'admin') { isPending = true; alert('관리자 권한을 요청했습니다. 승인 전까지 [작사] 권한으로 활동합니다.'); } 
-    else alert('회원가입이 완료되었습니다.');
-    const newUser = { name: authName, pin: authPin, role: initialRole, pendingAdmin: isPending };
+    let initialRole = 'player'; let isPending = false; let approved = false;
+    if (authName === '마스터') { initialRole = 'master'; approved = true; alert('최고 관리자(마스터) 계정이 생성되었습니다!'); } 
+    else if (authRoleReq === 'admin') { isPending = true; alert('가입 완료! 쓰기 및 관리자 권한은 마스터의 승인이 필요합니다.'); } 
+    else { alert('가입 완료! 대국 기록을 추가하려면 마스터의 승인이 필요합니다.'); }
+    const newUser = { name: authName, pin: authPin, role: initialRole, pendingAdmin: isPending, isApproved: approved };
     await setDoc(userRef, newUser);
     setCurrentUser(newUser); localStorage.setItem('mahjong_user', JSON.stringify(newUser));
     setIsAuthModalOpen(false); setAuthName(''); setAuthPin('');
@@ -92,7 +92,8 @@ function App() {
   };
 
   const handleLogout = () => { setCurrentUser(null); localStorage.removeItem('mahjong_user'); };
-  const handleApproveAdmin = async (name) => { await updateDoc(doc(db, 'users', name), { role: 'admin', pendingAdmin: false }); };
+  const handleApproveUser = async (name) => { await updateDoc(doc(db, 'users', name), { isApproved: true }); }; // 💡 쓰기 권한 승인 함수
+  const handleApproveAdmin = async (name) => { await updateDoc(doc(db, 'users', name), { role: 'admin', pendingAdmin: false, isApproved: true }); };
   const handleRejectAdmin = async (name) => { await updateDoc(doc(db, 'users', name), { pendingAdmin: false }); };
   const handlePromoteAdmin = async (name) => { await updateDoc(doc(db, 'users', name), { role: 'admin' }); };
   const handleDemotePlayer = async (name) => { await updateDoc(doc(db, 'users', name), { role: 'player' }); };
@@ -649,7 +650,17 @@ function App() {
         {activeNav === '기록' && selectedGameId === null && (
           <div className="flex-1 flex flex-col p-4 space-y-4">
             {displayedGames.length === 0 ? (
-              <div className="flex-1 flex flex-col items-center justify-center mt-20 text-gray-400 text-center"><Gamepad2 size={64} strokeWidth={1} className="mb-4 text-gray-300" /><h2 className="text-lg font-bold mb-2">검색된 대국 기록이 없습니다</h2>{canWrite ? <p className="text-xs">우측 하단 + 버튼으로 새 대국을 만드세요</p> : <p className="text-xs">우측 상단 로그인 후 기록을 추가할 수 있습니다</p>}</div>
+              <div className="flex-1 flex flex-col items-center justify-center mt-20 text-gray-400 text-center">
+                <Gamepad2 size={64} strokeWidth={1} className="mb-4 text-gray-300" />
+                <h2 className="text-lg font-bold mb-2">검색된 대국 기록이 없습니다</h2>
+                {canWrite ? (
+                  <p className="text-xs">우측 하단 + 버튼으로 새 대국을 만드세요</p>
+                ) : currentUser ? (
+                  <p className="text-xs font-bold text-red-500 bg-red-50 px-3 py-1.5 rounded-lg border border-red-100">쓰기 권한 승인 대기 중입니다 (마스터 문의)</p>
+                ) : (
+                  <p className="text-xs">우측 상단 로그인 후 기록을 추가할 수 있습니다</p>
+                )}
+              </div>
             ) : (
               displayedGames.map(game => {
                 const isYakuman = hasYakuman(game);
@@ -1196,6 +1207,15 @@ function App() {
               {allUsers.filter(u => u.role !== 'master').map(user => (
                 <div key={user.name} className="bg-white p-3 rounded-xl shadow-sm border border-gray-200">
                   <div className="flex justify-between items-center mb-2"><span className="font-bold text-lg text-gray-800">{user.name}</span><span className={`text-[10px] px-2 py-1 rounded font-bold ${user.role === 'admin' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600'}`}>{user.role === 'admin' ? '🛡️ 관리자' : '♟️ 작사'}</span></div>
+                  
+                  {/* 💡 쓰기 권한 승인 대기 알림 */}
+                  {user.isApproved === false && (
+                    <div className="bg-red-50 border border-red-200 p-2 rounded-lg mb-2 flex items-center justify-between">
+                      <span className="text-xs font-bold text-red-700">⚠️ 쓰기 권한 대기중 (작사)</span>
+                      <button onClick={() => handleApproveUser(user.name)} className="bg-[#2E7D32] text-white p-1.5 rounded hover:bg-green-800 text-xs font-bold px-3">승인</button>
+                    </div>
+                  )}
+
                   {user.pendingAdmin && (
                     <div className="bg-yellow-50 border border-yellow-200 p-2 rounded-lg mb-2 flex items-center justify-between"><span className="text-xs font-bold text-yellow-700">⚠️ 관리자 권한 요청됨</span><div className="flex gap-1"><button onClick={() => handleApproveAdmin(user.name)} className="bg-green-500 text-white p-1 rounded hover:bg-green-600"><UserCheck size={16}/></button><button onClick={() => handleRejectAdmin(user.name)} className="bg-gray-400 text-white p-1 rounded hover:bg-gray-500"><X size={16}/></button></div></div>
                   )}
