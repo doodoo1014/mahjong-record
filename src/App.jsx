@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
-import { Gamepad2, Plus, List, BarChart2, Trophy, ChevronLeft, Check, Trash2, ShieldAlert, Users, X, Flag, Edit, Lock, Unlock, Search, CalendarPlus, Shield, UserCheck, ShieldClose, UserX, MessageSquare, AlertOctagon, PieChart, BarChart, Bell, ArrowUpDown } from 'lucide-react';
+import { Gamepad2, Plus, List, BarChart2, Trophy, ChevronLeft, Check, Trash2, ShieldAlert, Users, X, Flag, Edit, Lock, Unlock, Search, CalendarPlus, Shield, UserCheck, ShieldClose, UserX, MessageSquare, AlertOctagon, PieChart, BarChart, Bell, ArrowUpDown, Swords } from 'lucide-react';
 import { db } from './firebase'; 
 import { collection, doc, setDoc, getDoc, updateDoc, deleteDoc, onSnapshot, query, orderBy } from 'firebase/firestore'; 
 
@@ -100,12 +100,16 @@ function App() {
   const isAdmin = currentUser?.role === 'admin' || currentUser?.role === 'master';
   const isMaster = currentUser?.role === 'master';
 
+  // 💡 라이벌 전적용 상태
+  const [rival1, setRival1] = useState('');
+  const [rival2, setRival2] = useState('');
+
   useEffect(() => {
     const qGames = query(collection(db, 'games'), orderBy('id', 'desc'));
     const unsubGames = onSnapshot(qGames, (snapshot) => { setGames(snapshot.docs.map(doc => doc.data())); setIsLoading(false); });
     const unsubSeasons = onSnapshot(doc(db, 'settings', 'seasons'), (docSnap) => {
       if (docSnap.exists() && docSnap.data().list) setSeasons(docSnap.data().list);
-      else setDoc(doc(db, 'settings', 'seasons'), { list: [{ id: 'season_1', name: '시즌 1', startDate: '', endDate: '' }] });
+      else setDoc(doc(db, 'settings', 'seasons'), { list: [{ id: 'season_free', name: '프리 시즌', startDate: '', endDate: '' }] });
     });
     return () => { unsubGames(); unsubSeasons(); };
   }, []);
@@ -1405,10 +1409,142 @@ function App() {
         )}
 
         {/* ========================================= */}
+        {/* 화면 5: ⚔️ 라이벌 (상대 전적) 페이지 */}
+        {/* ========================================= */}
+        {activeNav === '라이벌' && (() => {
+          // 등록된 모든 플레이어 목록 추출
+          const uniquePlayers = Array.from(new Set(games.flatMap(g => g.players))).sort();
+          
+          // 두 플레이어가 함께한 종료된 대국 필터링
+          const rivalGames = games.filter(g => g.status === '종료' && g.players.includes(rival1) && g.players.includes(rival2) && rival1 !== rival2);
+          
+          let p1Wins = 0, p2Wins = 0;
+          let p1RonP2 = 0, p2RonP1 = 0;
+          let p1RonP2Max = 0, p1RonP2Min = 99999;
+          let p2RonP1Max = 0, p2RonP1Min = 99999;
+
+          if (rival1 && rival2 && rivalGames.length > 0) {
+            rivalGames.forEach(g => {
+              const p1Idx = g.players.indexOf(rival1);
+              const p2Idx = g.players.indexOf(rival2);
+              
+              // 1. 순위 우위 비교
+              if (g.finalResults) {
+                const p1Score = Number(g.finalResults[p1Idx].score);
+                const p2Score = Number(g.finalResults[p2Idx].score);
+                if (p1Score > p2Score) p1Wins++;
+                else if (p2Score > p1Score) p2Wins++;
+              }
+              
+              // 2. 직접 방총 (서로 쏘인 횟수 및 최고/최저 점수 계산)
+              g.rounds.forEach(r => {
+                if (r.type === '화료' && r.winType === '론') {
+                  const dealerIndex = (r.roundNum - 1) % g.players.length;
+                  const isDealer = g.players.indexOf(r.winner) === dealerIndex;
+                  
+                  // 💡 순수 타점 계산 (본장 제외)
+                  const { pureTotal } = getMahjongScore(r.han, r.fu, isDealer, false, 0, g.type === '3인');
+
+                  if (r.winner === rival1 && r.loser === rival2) {
+                    p1RonP2++;
+                    if (pureTotal > p1RonP2Max) p1RonP2Max = pureTotal;
+                    if (pureTotal < p1RonP2Min) p1RonP2Min = pureTotal;
+                  }
+                  if (r.winner === rival2 && r.loser === rival1) {
+                    p2RonP1++;
+                    if (pureTotal > p2RonP1Max) p2RonP1Max = pureTotal;
+                    if (pureTotal < p2RonP1Min) p2RonP1Min = pureTotal;
+                  }
+                }
+              });
+            });
+          }
+
+          return (
+            <div className="flex-1 flex flex-col bg-[#F5F5DC] p-4 space-y-4">
+              <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-200">
+                <h3 className="font-black text-gray-800 text-lg flex items-center justify-center gap-2 mb-4"><Swords size={20}/> 상대 전적 검색</h3>
+                <div className="flex items-center justify-between gap-3">
+                  <select value={rival1} onChange={e => setRival1(e.target.value)} className="flex-1 p-3 bg-gray-50 border border-gray-200 rounded-xl font-bold text-center text-sm focus:outline-none focus:border-[#2E7D32]">
+                    <option value="">플레이어 1</option>
+                    {uniquePlayers.map(p => <option key={p} value={p}>{p}</option>)}
+                  </select>
+                  <span className="font-black text-red-500 text-sm">VS</span>
+                  <select value={rival2} onChange={e => setRival2(e.target.value)} className="flex-1 p-3 bg-gray-50 border border-gray-200 rounded-xl font-bold text-center text-sm focus:outline-none focus:border-blue-600">
+                    <option value="">플레이어 2</option>
+                    {uniquePlayers.map(p => <option key={p} value={p} disabled={p === rival1}>{p}</option>)}
+                  </select>
+                </div>
+              </div>
+
+              {!rival1 || !rival2 ? (
+                <div className="flex-1 flex items-center justify-center text-gray-400 font-bold text-sm">두 명의 플레이어를 선택해주세요.</div>
+              ) : rivalGames.length === 0 ? (
+                <div className="flex-1 flex items-center justify-center text-gray-400 font-bold text-sm">함께 대국한 기록이 없습니다.</div>
+              ) : (
+                <div className="space-y-4 animate-in fade-in slide-in-from-bottom-2">
+                  {/* 동탁 우위 기록 */}
+                  <div className="bg-[#1e293b] text-white p-4 rounded-2xl shadow-lg flex justify-center items-center gap-6">
+                    <div className="text-center flex-1"><span className="block text-2xl font-black">{p1Wins}승</span><span className="text-[10px] text-gray-400">{rival1} 우위</span></div>
+                    <div className="flex flex-col items-center"><span className="text-xs font-bold text-gray-400 bg-gray-800 px-3 py-1 rounded-full">총 {rivalGames.length}국 동탁</span></div>
+                    <div className="text-center flex-1"><span className="block text-2xl font-black">{p2Wins}승</span><span className="text-[10px] text-gray-400">{rival2} 우위</span></div>
+                  </div>
+
+                  {/* 💡 직접 방총 기록 (최고/최저 타점 포함) */}
+                  <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
+                    <div className="p-3 bg-gray-50 border-b border-gray-100 text-center font-bold text-sm text-gray-700">🩸 직접 타격 (방총)</div>
+                    <div className="flex p-4 items-center justify-between">
+                      
+                      {/* Player 1이 Player 2를 쏘았을 때 */}
+                      <div className="text-center w-[45%]">
+                        <span className="block text-[11px] font-bold text-gray-600 mb-2 bg-gray-100 py-1.5 rounded-lg border border-gray-200">
+                          {rival1} <span className="text-black-400">→</span> {rival2}
+                        </span>
+                        <span className="text-2xl font-black text-gray-800">{p1RonP2}회</span>
+                        <div className="mt-3 space-y-1 bg-gray-50 p-2 rounded-lg border border-gray-100">
+                          <div className="text-[10px] text-gray-500 flex justify-between px-1"><span className="font-bold">최고 타점</span><span className="font-black text-[#2E7D32]">{p1RonP2Max > 0 ? p1RonP2Max.toLocaleString() : 0}점</span></div>
+                          <div className="text-[10px] text-gray-500 flex justify-between px-1"><span className="font-bold">최저 타점</span><span className="font-black text-[#2E7D32]">{p1RonP2Min !== 99999 ? p1RonP2Min.toLocaleString() : 0}점</span></div>
+                        </div>
+                      </div>
+
+                      <div className="w-[10%] text-center text-gray-300 flex justify-center"><Swords size={24} strokeWidth={1.5}/></div>
+                      
+                      {/* Player 2가 Player 1을 쏘았을 때 */}
+                      <div className="text-center w-[45%]">
+                        <span className="block text-[11px] font-bold text-gray-600 mb-2 bg-gray-100 py-1.5 rounded-lg border border-gray-200">
+                          {rival2} <span className="text-black-500">→</span> {rival1}
+                        </span>
+                        <span className="text-2xl font-black text-gray-800">{p2RonP1}회</span>
+                        <div className="mt-3 space-y-1 bg-gray-50 p-2 rounded-lg border border-gray-100">
+                          <div className="text-[10px] text-gray-500 flex justify-between px-1"><span className="font-bold">최고 타점</span><span className="font-black text-blue-600">{p2RonP1Max > 0 ? p2RonP1Max.toLocaleString() : 0}점</span></div>
+                          <div className="text-[10px] text-gray-500 flex justify-between px-1"><span className="font-bold">최저 타점</span><span className="font-black text-blue-600">{p2RonP1Min !== 99999 ? p2RonP1Min.toLocaleString() : 0}점</span></div>
+                        </div>
+                      </div>
+
+                    </div>
+                  </div>
+                  
+                </div>
+              )}
+            </div>
+          );
+        })()}
+
+        {/* ========================================= */}
         {/* 화면 4: 📢 업데이트 내역 페이지 */}
         {/* ========================================= */}
         {activeNav === '업데이트' && (
           <div className="flex-1 flex flex-col p-4 space-y-4">
+            <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-200 animate-in fade-in slide-in-from-bottom-2">
+              <div className="flex items-center justify-between mb-4 border-b border-gray-100 pb-3">
+                <span className="font-black text-[#2E7D32] text-xl">v1.0.2</span>
+                <span className="text-sm font-bold text-gray-400">2026/03/06</span>
+              </div>
+              <ul className="text-sm font-bold text-gray-700 space-y-2 pl-2 list-disc list-inside">
+                <li>라이벌 페이지를 신설하였습니다.</li>
+                <li>개인 통계 페이지에서 화료 및 방총의 상대를 볼 수 있도록 개선하였습니다.</li>
+              </ul>
+            </div>
             <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-200 animate-in fade-in slide-in-from-bottom-2">
               <div className="flex items-center justify-between mb-4 border-b border-gray-100 pb-3">
                 <span className="font-black text-[#2E7D32] text-xl">v1.0.1</span>
@@ -1480,11 +1616,11 @@ function App() {
               (selectedSeason === 'all' || g.seasonId === selectedSeason)
             );
 
-            let playCount = 0, tScore = 0, tUma = 0, tRank = 0, rCount = 0; // 💡 rCount(라운드 수) 추가
+            let playCount = 0, tScore = 0, tUma = 0, tRank = 0, rCount = 0;
             let tUma4 = 0, tUma3 = 0;
             let ranks = [0, 0, 0, 0];
             let wCount = 0, wScore = 0, wScoreCount = 0, dCount = 0, dScore = 0, dScoreCount = 0, mHonba = 0;
-            let maxScore = -99999, minScore = 99999, maxWinScore = 0, maxDealInScore = 0; // 💡 최고 타점/방총점 초기화 추가
+            let maxScore = -99999, minScore = 99999, maxWinScore = 0, maxDealInScore = 0;
             let tobiCount = 0, yakumanCount = 0, chomboCount = 0;
             let yakus = {};
             let waitTypes = {};
@@ -1513,12 +1649,11 @@ function App() {
                     if (finalScore < 0) tobiCount++;
                 }
                 g.rounds.forEach(r => {
-                    rCount++; // 💡 플레이한 전체 라운드 수 합산
+                    rCount++; 
                     if(r.type === '촌보' && r.chomboPlayer === selectedStatPlayer.name) chomboCount++;
                     if(r.type === '화료' && r.winner === selectedStatPlayer.name) {
                         wCount++;
                         
-                        // 자동 계산 로직 적용 (본장 0 처리하여 순수 점수 추출)
                         const dealerIndex = (r.roundNum - 1) % g.players.length;
                         const isDealer = g.players.indexOf(r.winner) === dealerIndex;
                         const isTsumo = r.winType === '쯔모';
@@ -1526,7 +1661,7 @@ function App() {
 
                         if (pureTotal > 0) { 
                           wScore += pureTotal; wScoreCount++; 
-                          if (pureTotal > maxWinScore) maxWinScore = pureTotal; // 💡 최고 타점 기록
+                          if (pureTotal > maxWinScore) maxWinScore = pureTotal; 
                         }
                         if(r.honba > mHonba) mHonba = r.honba;
                         
@@ -1557,7 +1692,7 @@ function App() {
                         const { pureTotal } = getMahjongScore(r.han, r.fu, isDealer, false, 0, g.type === '3인');
                         if(pureTotal > 0) { 
                           dScore += pureTotal; dScoreCount++; 
-                          if (pureTotal > maxDealInScore) maxDealInScore = pureTotal; // 💡 최고 방총점 기록
+                          if (pureTotal > maxDealInScore) maxDealInScore = pureTotal; 
                         }
                     }
                 });
@@ -1568,15 +1703,113 @@ function App() {
                 yakumanCount, chomboCount, ranks, tobiCount,
                 tobiRate: playCount > 0 ? ((tobiCount / playCount) * 100).toFixed(1) : 0,
                 rentaiRate: playCount > 0 ? (((ranks[0] + ranks[1]) / playCount) * 100).toFixed(1) : 0,
-                winRate: rCount > 0 ? ((wCount / rCount) * 100).toFixed(1) : 0, // 💡 화료율 추가
-                dealInRate: rCount > 0 ? ((dCount / rCount) * 100).toFixed(1) : 0, // 💡 방총율 추가
-                maxScore, minScore, maxWinScore, maxDealInScore, // 💡 최고타점,방총점 객체에 포함
+                winRate: rCount > 0 ? ((wCount / rCount) * 100).toFixed(1) : 0, 
+                dealInRate: rCount > 0 ? ((dCount / rCount) * 100).toFixed(1) : 0, 
+                maxScore, minScore, maxWinScore, maxDealInScore, 
                 avgScore: playCount > 0 ? Math.floor(tScore / playCount) : 0,
                 avgWinScore: wScoreCount > 0 ? Math.floor(wScore / wScoreCount) : 0,
                 avgUma: playCount > 0 ? (tUma / playCount).toFixed(1) : 0,
                 maxHonba: mHonba, avgDealInScore: dScoreCount > 0 ? Math.floor(dScore / dScoreCount) : 0,
                 yakus, riichiWinCount, damaWinCount, furoWinCount, menzenTsumo, menzenRon, furoTsumo, furoRon, waitTypes
             };
+
+            // 💡 1. 화료 상세 분석 함수 (시즌/인원 필터 자동 적용)
+            const handleWinBreakdown = () => {
+              const stats = { '쯔모': 0 };
+              modalGames.forEach(g => g.rounds.forEach(r => {
+                if (r.type === '화료' && r.winner === selectedStatPlayer.name) {
+                  if (r.winType === '쯔모') stats['쯔모']++;
+                  else if (r.loser) stats[r.loser] = (stats[r.loser] || 0) + 1;
+                }
+              }));
+              
+              const rawData = Object.entries(stats).map(([name, count]) => ({ name, count })).filter(d => d.count > 0).sort((a,b) => {
+                if (b.count !== a.count) return b.count - a.count;
+                return a.name.localeCompare(b.name);
+              });
+              
+              let currentRank = 1;
+              const rankedData = rawData.map((item, index, arr) => {
+                if (index > 0 && item.count < arr[index - 1].count) currentRank = index + 1;
+                return { ...item, rank: currentRank };
+              });
+
+              let filterText = playerStatTab === '전체' ? '전체 마작' : playerStatTab;
+              let seasonText = selectedSeason === 'all' ? '전체 시즌' : seasons.find(s => s.id === selectedSeason)?.name || '';
+              setBreakdownData({ title: `${selectedStatPlayer.name}의 화료 대상 (${seasonText}, ${filterText})`, data: rankedData });
+            };
+
+            // 💡 2. 방총 상세 분석 함수 (시즌/인원 필터 자동 적용)
+            const handleDealInBreakdown = () => {
+              const stats = {};
+              modalGames.forEach(g => g.rounds.forEach(r => {
+                if (r.type === '화료' && r.winType === '론' && r.loser === selectedStatPlayer.name) {
+                  stats[r.winner] = (stats[r.winner] || 0) + 1;
+                }
+              }));
+              
+              const rawData = Object.entries(stats).map(([name, count]) => ({ name, count })).filter(d => d.count > 0).sort((a,b) => {
+                if (b.count !== a.count) return b.count - a.count;
+                return a.name.localeCompare(b.name);
+              });
+              
+              let currentRank = 1;
+              const rankedData = rawData.map((item, index, arr) => {
+                if (index > 0 && item.count < arr[index - 1].count) currentRank = index + 1;
+                return { ...item, rank: currentRank };
+              });
+
+              let filterText = playerStatTab === '전체' ? '전체 마작' : playerStatTab;
+              let seasonText = selectedSeason === 'all' ? '전체 시즌' : seasons.find(s => s.id === selectedSeason)?.name || '';
+              setBreakdownData({ title: `${selectedStatPlayer.name}의 방총 대상 (${seasonText}, ${filterText})`, data: rankedData });
+            };
+
+            // 💡 3. 최근 8개 대국 누적 우마 차트 데이터 가공
+            // 전체 대국을 과거 -> 최신(시간순)으로 정렬
+            const chronologicalGames = [...modalGames].filter(g => g.finalResults).reverse();
+            
+            // 누적 우마 계산
+            let currentTotalUma = 0;
+            const cumulativeGames = chronologicalGames.map(g => {
+              const pIdx = g.players.indexOf(selectedStatPlayer.name);
+              const pt = Number(g.finalResults[pIdx].pt);
+              currentTotalUma += pt;
+              return { 
+                id: g.id, 
+                date: g.date, 
+                pt: parseFloat(currentTotalUma.toFixed(1)), // 누적 우마
+                gamePt: pt // 해당 판의 우마
+              };
+            });
+
+            // 그 중 최근 8개만 추출
+            const recentGames = cumulativeGames.slice(-8);
+
+            const chartWidth = 320;
+            const chartHeight = 150;
+            const padX = 25;
+            const padY = 35; // 라벨이 잘리지 않도록 여백 확보
+            const innerW = chartWidth - padX * 2;
+            const innerH = chartHeight - padY * 2;
+
+            const pts = recentGames.map(g => g.pt);
+            let maxPt = pts.length > 0 ? Math.max(...pts) : 0;
+            let minPt = pts.length > 0 ? Math.min(...pts) : 0;
+            
+            // 그래프 상하 여백 확보
+            if (maxPt === minPt) { 
+              maxPt += 10; minPt -= 10; 
+            } else {
+              const diff = maxPt - minPt;
+              maxPt += diff * 0.2; 
+              minPt -= diff * 0.2;
+            }
+            const ptRange = maxPt - minPt;
+
+            const getX = (index) => recentGames.length === 1 ? chartWidth / 2 : padX + (index * (innerW / (recentGames.length - 1)));
+            const getY = (pt) => padY + innerH - ((pt - minPt) / ptRange) * innerH;
+            const zeroY = getY(0);
+            const pointsStr = recentGames.map((g, i) => `${getX(i)},${getY(g.pt)}`).join(' ');
 
             return (
               <div className="bg-[#F5F5DC] w-full h-[90%] rounded-t-3xl shadow-2xl flex flex-col animate-in slide-in-from-bottom">
@@ -1618,14 +1851,19 @@ function App() {
                     )}
                   </div>
 
-                  {/* 💡 요청 반영: '전체' 탭이 아닐 때만(4인/3인 탭) 상세 통계와 평균 지표 렌더링 */}
                   {playerStatTab !== '전체' && (
                     <>
                       <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
                         <h3 className="text-sm font-bold text-gray-800 mb-3 flex items-center gap-1.5"><BarChart size={16}/> 상세 통계</h3>
                         <div className="grid grid-cols-4 gap-2 text-center text-sm font-medium mb-3">
-                          <div className="flex flex-col gap-1"><span className="text-[10px] text-gray-500 font-bold">화료</span><span className="font-black text-[#2E7D32]">{mStat.winCount}회 <span className="text-[10px] font-bold text-gray-400">({mStat.winRate}%)</span></span></div>
-                          <div className="flex flex-col gap-1"><span className="text-[10px] text-gray-500 font-bold">방총</span><span className="font-black text-orange-500">{mStat.dealInCount}회 <span className="text-[10px] font-bold text-gray-400">({mStat.dealInRate}%)</span></span></div>
+                          <div onClick={handleWinBreakdown} className="flex flex-col gap-1 cursor-pointer hover:bg-gray-50 p-1 rounded transition-colors active:scale-95 border border-transparent hover:border-gray-200">
+                            <span className="text-[10px] text-gray-500 font-bold underline decoration-dotted underline-offset-2">화료 (상세)</span>
+                            <span className="font-black text-[#2E7D32]">{mStat.winCount}회 <span className="text-[10px] font-bold text-gray-400">({mStat.winRate}%)</span></span>
+                          </div>
+                          <div onClick={handleDealInBreakdown} className="flex flex-col gap-1 cursor-pointer hover:bg-gray-50 p-1 rounded transition-colors active:scale-95 border border-transparent hover:border-gray-200">
+                            <span className="text-[10px] text-gray-500 font-bold underline decoration-dotted underline-offset-2">방총 (상세)</span>
+                            <span className="font-black text-orange-500">{mStat.dealInCount}회 <span className="text-[10px] font-bold text-gray-400">({mStat.dealInRate}%)</span></span>
+                          </div>
                           <div className="flex flex-col gap-1"><span className="text-[10px] text-gray-500 font-bold">역만수</span><span className="font-black text-red-600">{mStat.yakumanCount}회</span></div>
                           <div className="flex flex-col gap-1"><span className="text-[10px] text-gray-500 font-bold">쵼보수</span><span className="font-black text-purple-600">{mStat.chomboCount}회</span></div>
                         </div>
@@ -1649,7 +1887,6 @@ function App() {
                         </div>
                       </div>
 
-                      {/* 💡 3x3 그리드로 변경 및 최고 타점/방총점 추가 (데이터 없을 시 0 표기) */}
                       <div className="grid grid-cols-3 gap-2 text-center">
                         <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-2"><span className="block text-[9px] text-gray-500 font-bold mb-1">최고 점수</span><span className="text-sm font-black text-gray-800">{mStat.maxScore === -99999 ? 0 : Number(mStat.maxScore).toLocaleString()}</span></div>
                         <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-2"><span className="block text-[9px] text-gray-500 font-bold mb-1">최소 점수</span><span className="text-sm font-black text-gray-800">{mStat.minScore === 99999 ? 0 : Number(mStat.minScore).toLocaleString()}</span></div>
@@ -1663,8 +1900,58 @@ function App() {
                         <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-2"><span className="block text-[9px] text-gray-500 font-bold mb-1">평균 방총점</span><span className="text-sm font-black text-orange-500">{Number(mStat.avgDealInScore).toLocaleString()}점</span></div>
                         <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-2"><span className="block text-[9px] text-gray-500 font-bold mb-1">최대 연장</span><span className="text-sm font-black text-gray-800">{mStat.maxHonba}본장</span></div>
                       </div>
+
+                      {/* 📈 최근 8국 누적 우마 꺾은선 차트 */}
+                      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 relative overflow-hidden mt-4">
+                        <h3 className="text-sm font-bold text-gray-800 mb-2 flex items-center gap-1.5"><BarChart2 size={16}/> 최근 8국 누적 우마 변동</h3>
+                        {recentGames.length === 0 ? (
+                          <p className="text-center text-gray-400 py-6 font-bold text-xs">종료된 대국이 없습니다.</p>
+                        ) : (
+                          <div className="w-full overflow-visible mt-4">
+                            <svg viewBox={`0 0 ${chartWidth} ${chartHeight}`} className="w-full h-auto overflow-visible">
+                              {/* 0점 기준선 (화면 내에 있을 때만 보임) */}
+                              <line x1={padX} y1={zeroY} x2={chartWidth - padX} y2={zeroY} stroke="#e2e8f0" strokeWidth="2" strokeDasharray="4 4" />
+                              
+                              {/* 누적 꺾은선 (파란색 메인 라인) */}
+                              <polyline points={pointsStr} fill="none" stroke="#3b82f6" strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />
+                              
+                              {/* 데이터 점 및 라벨 */}
+                              {recentGames.map((g, i) => {
+                                const x = getX(i);
+                                const y = getY(g.pt);
+                                
+                                // 개별 대국의 성적에 따라 점 색상 결정 (올라갔으면 초록, 내려갔으면 빨강)
+                                const isGamePositive = g.gamePt > 0;
+                                const isGameZero = g.gamePt === 0;
+                                const dotColor = isGamePositive ? '#2E7D32' : isGameZero ? '#64748b' : '#ef4444';
+                                
+                                return (
+                                  <g key={`${g.id}-${i}`} className="transition-all duration-300">
+                                    {/* 점선 가이드라인 */}
+                                    <line x1={x} y1={chartHeight - 10} x2={x} y2={y} stroke="#cbd5e1" strokeWidth="1" strokeDasharray="2 2" />
+                                    
+                                    {/* 데이터 포인트 */}
+                                    <circle cx={x} cy={y} r="4.5" fill="white" stroke={dotColor} strokeWidth="2.5" />
+                                    
+                                    {/* 💡 누적 우마 합계 라벨 (크게) */}
+                                    <text x={x} y={y - 12} textAnchor="middle" fontSize="11" fontWeight="900" fill={g.pt > 0 ? '#2E7D32' : g.pt < 0 ? '#ef4444' : '#64748b'}>
+                                      {g.pt > 0 ? `+${g.pt}` : g.pt}
+                                    </text>
+                                    
+                                    {/* 💡 개별 대국 변동폭 라벨 (작게) */}
+                                    <text x={x} y={y + 16} textAnchor="middle" fontSize="9" fontWeight="bold" fill={dotColor} opacity="0.8">
+                                      ({g.gamePt > 0 ? `+${g.gamePt}` : g.gamePt})
+                                    </text>
+                                  </g>
+                                );
+                              })}
+                            </svg>
+                          </div>
+                        )}
+                      </div>
                     </>
                   )}
+
                   <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
                     <h3 className="text-sm font-bold text-gray-800 mb-3">모든 사용 역 현황</h3>
                     {Object.keys(mStat.yakus).length === 0 ? <p className="text-xs text-gray-400">기록된 역이 없습니다.</p> : (
@@ -2037,10 +2324,12 @@ function App() {
 
       {/* 네비게이션 바 */}
       <nav className="fixed bottom-0 w-full bg-white border-t border-gray-200 flex justify-around p-2 pb-6 z-10">
-        <button className={`flex flex-col items-center p-2 transition-colors ${activeNav === '기록' ? 'text-[#2E7D32]' : 'text-gray-400'}`} onClick={() => {setActiveNav('기록'); setSelectedGameId(null);}}><List size={24} /><span className="text-[10px] mt-1 font-bold">대국 기록</span></button>
+        <button className={`flex flex-col items-center p-2 transition-colors ${activeNav === '기록' ? 'text-[#2E7D32]' : 'text-gray-400'}`} onClick={() => {setActiveNav('기록'); setSelectedGameId(null);}}><List size={24} /><span className="text-[10px] mt-1 font-bold">기록</span></button>
         <button className={`flex flex-col items-center p-2 transition-colors ${activeNav === '통계' ? 'text-[#2E7D32]' : 'text-gray-400'}`} onClick={() => setActiveNav('통계')}><BarChart2 size={24} /><span className="text-[10px] mt-1 font-bold">통계</span></button>
+        {/* 💡 라이벌 탭 추가 */}
+        <button className={`flex flex-col items-center p-2 transition-colors ${activeNav === '라이벌' ? 'text-[#2E7D32]' : 'text-gray-400'}`} onClick={() => setActiveNav('라이벌')}><Swords size={24} /><span className="text-[10px] mt-1 font-bold">라이벌</span></button>
         <button className={`flex flex-col items-center p-2 transition-colors ${activeNav === '랭킹' ? 'text-[#2E7D32]' : 'text-gray-400'}`} onClick={() => setActiveNav('랭킹')}><Trophy size={24} /><span className="text-[10px] mt-1 font-bold">랭킹</span></button>
-        <button className={`flex flex-col items-center p-2 transition-colors ${activeNav === '업데이트' ? 'text-[#2E7D32]' : 'text-gray-400'}`} onClick={() => {setActiveNav('업데이트'); setSelectedGameId(null);}}><Bell size={24} /><span className="text-[10px] mt-1 font-bold">업데이트</span></button>
+        <button className={`flex flex-col items-center p-2 transition-colors ${activeNav === '업데이트' ? 'text-[#2E7D32]' : 'text-gray-400'}`} onClick={() => {setActiveNav('업데이트'); setSelectedGameId(null);}}><Bell size={24} /><span className="text-[10px] mt-1 font-bold">설정</span></button>
       </nav>
     </div>
   );
