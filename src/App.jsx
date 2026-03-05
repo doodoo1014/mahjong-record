@@ -165,6 +165,7 @@ function App() {
   const [selectedYaku, setSelectedYaku] = useState([]); const [furoDecreased, setFuroDecreased] = useState([]); 
   const [tenpaiPlayers, setTenpaiPlayers] = useState([]); const [nagashiMangan, setNagashiMangan] = useState([]); const [abortiveType, setAbortiveType] = useState(null); 
   const [roundComment, setRoundComment] = useState(''); const [chomboPlayer, setChomboPlayer] = useState(null); const [chomboType, setChomboType] = useState('만관 지불');
+  const [editingRoundId, setEditingRoundId] = useState(null); // 💡 수정 모드 식별용 상태
 
   const currentGame = games.find(g => g.id === selectedGameId);
   const records = currentGame ? currentGame.rounds : [];
@@ -252,8 +253,40 @@ function App() {
     setPlayerE(''); setPlayerS(''); setPlayerW(''); setPlayerN('');
   };
 
+  const handleOpenNewRound = () => {
+    setEditingRoundId(null);
+    setRecordMode('화료'); setWind('동'); setRoundNum(1); setHonba(0); setKyotaku(0);
+    setWinType('쯔모'); setWinner(null); setLoser(null); setWaitType('양면'); setMenzen('멘젠');
+    setDora(0); setAka(0); setUra(0); setPei(0); setFu(30); setHan(1); setScore('');
+    setSelectedYaku([]); setFuroDecreased([]); setTenpaiPlayers([]); setNagashiMangan([]);
+    setAbortiveType(null); setRoundComment(''); setChomboPlayer(null); setChomboType('만관 지불');
+    setIsRoundModalOpen(true);
+  };
+
+  const handleEditRound = (record) => {
+    setEditingRoundId(record.id);
+    setRecordMode(record.type); setWind(record.wind); setRoundNum(record.roundNum); setHonba(record.honba); setKyotaku(record.kyotaku);
+    if (record.type === '화료') {
+      setWinType(record.winType); setWinner(players.indexOf(record.winner)); 
+      setLoser(record.loser ? players.indexOf(record.loser) : null);
+      setWaitType(record.waitType); setMenzen(record.menzen);
+      setDora(record.dora); setAka(record.aka); setUra(record.ura); setPei(record.pei);
+      setFu(record.fu); setHan(record.han); setScore(record.score || '');
+      setSelectedYaku(record.selectedYaku || []); setFuroDecreased(record.furoDecreased || []);
+    } else if (record.type === '유국') {
+      setTenpaiPlayers(record.tenpaiPlayers.map(p => players.indexOf(p)));
+      setNagashiMangan(record.nagashiMangan ? record.nagashiMangan.map(p => players.indexOf(p)) : []);
+      setAbortiveType(record.abortiveType);
+    } else if (record.type === '촌보') {
+      setChomboPlayer(players.indexOf(record.chomboPlayer));
+      setChomboType(record.chomboType);
+    }
+    setRoundComment(record.comment || '');
+    setIsRoundModalOpen(true);
+  };
+
   const handleSaveRound = async () => {
-    let newRound = { id: Date.now(), wind, roundNum, honba, kyotaku, type: recordMode, comment: roundComment };
+    let newRound = { id: editingRoundId || Date.now(), wind, roundNum, honba, kyotaku, type: recordMode, comment: roundComment };
     if (recordMode === '화료') {
       if (winner === null) return alert("화료자를 선택해주세요!");
       if (winType === '론' && loser === null) return alert("방총자를 선택해주세요!");
@@ -264,9 +297,16 @@ function App() {
       if (chomboPlayer === null) return alert("촌보 발생자를 선택해주세요!");
       newRound = { ...newRound, chomboPlayer: players[chomboPlayer], chomboType };
     }
-    const updatedGame = { ...currentGame, rounds: [newRound, ...currentGame.rounds] };
-    await setDoc(doc(db, 'games', selectedGameId.toString()), updatedGame);
-    setIsRoundModalOpen(false); setWinner(null); setLoser(null); setSelectedYaku([]); setFuroDecreased([]); setDora(0); setAka(0); setUra(0); setPei(0); setTenpaiPlayers([]); setNagashiMangan([]); setAbortiveType(null); setRoundComment(''); setScore(''); setChomboPlayer(null); setChomboType('만관 지불');
+    
+    // 수정 모드일 땐 기존 아이디를 찾아 덮어씌우고, 아닐 땐 맨 앞에 추가
+    const updatedRounds = editingRoundId 
+      ? currentGame.rounds.map(r => r.id === editingRoundId ? newRound : r)
+      : [newRound, ...currentGame.rounds];
+
+    await setDoc(doc(db, 'games', selectedGameId.toString()), { ...currentGame, rounds: updatedRounds });
+    
+    setIsRoundModalOpen(false); setEditingRoundId(null);
+    setWinner(null); setLoser(null); setSelectedYaku([]); setFuroDecreased([]); setDora(0); setAka(0); setUra(0); setPei(0); setTenpaiPlayers([]); setNagashiMangan([]); setAbortiveType(null); setRoundComment(''); setScore(''); setChomboPlayer(null); setChomboType('만관 지불');
   };
 
   const handleDeleteRound = async (roundId) => { if(confirm("이 국의 기록을 삭제하시겠습니까?")) await setDoc(doc(db, 'games', selectedGameId.toString()), { ...currentGame, rounds: currentGame.rounds.filter(r => r.id !== roundId) }); };
@@ -681,7 +721,13 @@ function App() {
                         {record.type === '유국' && ' (유국)'}
                         {record.type === '촌보' && ' (촌보)'}
                       </span>
-                      {canWrite && <button onClick={() => handleDeleteRound(record.id)} className="text-gray-400 hover:text-red-500 transition-colors"><Trash2 size={14} /></button>}
+                      {canWrite && (
+                        <div className="flex items-center gap-2">
+                          {/* 💡 연필 아이콘 추가 */}
+                          <button onClick={() => handleEditRound(record)} className="text-gray-400 hover:text-blue-500 transition-colors"><Edit size={14} /></button>
+                          <button onClick={() => handleDeleteRound(record.id)} className="text-gray-400 hover:text-red-500 transition-colors"><Trash2 size={14} /></button>
+                        </div>
+                      )}
                     </div>
 
                     {/* 💡 카드 본문 영역 */}
@@ -704,7 +750,10 @@ function App() {
               )}
             </div>
             {currentGame.status === '진행중' && canWrite && (
-              <div className="fixed bottom-20 right-6 z-20"><button onClick={() => setIsRoundModalOpen(true)} className="bg-[#2E7D32] text-white p-4 rounded-full shadow-lg hover:bg-green-800 active:scale-95 transition-transform"><Plus size={28} strokeWidth={3} /></button></div>
+              <div className="fixed bottom-20 right-6 z-20">
+                {/* 💡 버튼을 눌렀을 때 초기화 함수 호출로 변경 */}
+                <button onClick={handleOpenNewRound} className="bg-[#2E7D32] text-white p-4 rounded-full shadow-lg hover:bg-green-800 active:scale-95 transition-transform"><Plus size={28} strokeWidth={3} /></button>
+              </div>
             )}
           </div>
         )}
@@ -1190,7 +1239,12 @@ function App() {
 
       {isRoundModalOpen && (
         <div className="absolute inset-0 bg-[#F5F5DC] z-50 flex flex-col overflow-hidden animate-in slide-in-from-bottom">
-          <div className="bg-[#2E7D32] text-white p-4 flex justify-between items-center pt-10 shadow-sm z-10"><button onClick={() => setIsRoundModalOpen(false)}><ChevronLeft size={28} /></button><h2 className="text-xl font-bold">{wind}{roundNum}국 기록</h2><button onClick={handleSaveRound} className="text-sm font-bold bg-green-700 px-3 py-1 rounded hover:bg-green-600">저장</button></div>
+          <div className="bg-[#2E7D32] text-white p-4 flex justify-between items-center pt-10 shadow-sm z-10">
+            <button onClick={() => setIsRoundModalOpen(false)}><ChevronLeft size={28} /></button>
+            {/* 💡 수정 모드일 때는 '기록 수정'으로 표시되도록 제목 변경 */}
+            <h2 className="text-xl font-bold">{editingRoundId ? '기록 수정' : `${wind}${roundNum}국 기록`}</h2>
+            <button onClick={handleSaveRound} className="text-sm font-bold bg-green-700 px-3 py-1 rounded hover:bg-green-600">저장</button>
+          </div>
           <div className="flex bg-white shadow-sm z-10 text-sm"><button onClick={() => setRecordMode('화료')} className={`flex-1 py-4 font-bold border-b-4 transition-colors ${recordMode === '화료' ? 'border-[#2E7D32] text-[#2E7D32]' : 'border-transparent text-gray-400'}`}>화료</button><button onClick={() => setRecordMode('유국')} className={`flex-1 py-4 font-bold border-b-4 transition-colors ${recordMode === '유국' ? 'border-gray-600 text-gray-700' : 'border-transparent text-gray-400'}`}>유국</button><button onClick={() => setRecordMode('촌보')} className={`flex-1 py-4 font-bold border-b-4 transition-colors ${recordMode === '촌보' ? 'border-red-500 text-red-600' : 'border-transparent text-gray-400'}`}>촌보</button></div>
           <div className="flex-1 overflow-y-auto p-4 space-y-8 pb-32">
             <section className="space-y-3">
@@ -1210,11 +1264,12 @@ function App() {
                 </div>
                 {/* 국 번호 박스 */}
                 <div className="flex-1 flex justify-between items-center p-2.5 bg-white rounded-xl border border-gray-100 shadow-sm min-w-[120px]">
-                  <span className="font-bold text-[#2E7D32] text-sm">국 번호</span>
+                  <span className="font-bold text-[#2E7D32] text-sm">국</span>
                   <div className="flex items-center gap-1.5">
-                    <button onClick={() => setRoundNum(Math.max(1, roundNum - 1))} className="bg-gray-100 w-8 h-8 rounded font-bold hover:bg-gray-200">-</button>
-                    <span className="font-bold text-lg w-4 text-center text-black">{roundNum}</span>
-                    <button onClick={() => setRoundNum(Math.min(4, roundNum + 1))} className="bg-gray-100 w-8 h-8 rounded font-bold hover:bg-gray-200">+</button>
+                    {/* 💡 국 번호가 변경되면 setHonba(0)으로 본장 동시 초기화 */}
+                    <button onClick={() => { setRoundNum(Math.max(1, roundNum - 1)); setHonba(0); }} className="bg-gray-100 w-8 h-8 rounded font-bold hover:bg-gray-200">-</button>
+                    <span className="font-bold text-lg w-4 text-center text-[#2E7D32]">{roundNum}</span>
+                    <button onClick={() => { setRoundNum(Math.min(4, roundNum + 1)); setHonba(0); }} className="bg-gray-100 w-8 h-8 rounded font-bold hover:bg-gray-200">+</button>
                   </div>
                 </div>
               </div>
