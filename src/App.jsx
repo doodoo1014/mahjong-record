@@ -1207,15 +1207,6 @@ function App() {
               {allUsers.filter(u => u.role !== 'master').map(user => (
                 <div key={user.name} className="bg-white p-3 rounded-xl shadow-sm border border-gray-200">
                   <div className="flex justify-between items-center mb-2"><span className="font-bold text-lg text-gray-800">{user.name}</span><span className={`text-[10px] px-2 py-1 rounded font-bold ${user.role === 'admin' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600'}`}>{user.role === 'admin' ? '🛡️ 관리자' : '♟️ 작사'}</span></div>
-                  
-                  {/* 💡 쓰기 권한 승인 대기 알림 */}
-                  {user.isApproved === false && (
-                    <div className="bg-red-50 border border-red-200 p-2 rounded-lg mb-2 flex items-center justify-between">
-                      <span className="text-xs font-bold text-red-700">⚠️ 쓰기 권한 대기중 (작사)</span>
-                      <button onClick={() => handleApproveUser(user.name)} className="bg-[#2E7D32] text-white p-1.5 rounded hover:bg-green-800 text-xs font-bold px-3">승인</button>
-                    </div>
-                  )}
-
                   {user.pendingAdmin && (
                     <div className="bg-yellow-50 border border-yellow-200 p-2 rounded-lg mb-2 flex items-center justify-between"><span className="text-xs font-bold text-yellow-700">⚠️ 관리자 권한 요청됨</span><div className="flex gap-1"><button onClick={() => handleApproveAdmin(user.name)} className="bg-green-500 text-white p-1 rounded hover:bg-green-600"><UserCheck size={16}/></button><button onClick={() => handleRejectAdmin(user.name)} className="bg-gray-400 text-white p-1 rounded hover:bg-gray-500"><X size={16}/></button></div></div>
                   )}
@@ -1312,23 +1303,36 @@ function App() {
               
               {/* 💡 국풍과 국 번호를 2개의 개별 흰색 박스로 분리 (본장/공탁과 동일한 스타일) */}
               <div className="flex flex-wrap gap-3">
-                {/* 국풍 박스 */}
-                <div className="flex-1 flex justify-between items-center p-2.5 bg-white rounded-xl border border-gray-100 shadow-sm min-w-[200px]">
-                  <span className="font-bold text-green-700 text-sm">국풍</span>
-                  <div className="flex gap-1">
-                    {['동', '남', '서', '북'].map(w => (
-                      <button key={w} onClick={() => setWind(w)} className={`w-8 h-8 rounded-lg font-bold border-2 transition-colors ${wind === w ? 'bg-[#2E7D32] border-[#2E7D32] text-white' : 'bg-white border-gray-200 text-gray-400'}`}>{w}</button>
-                    ))}
+                {/* 국풍 박스 ( < > 버튼으로 순환 ) */}
+                <div className="flex-1 flex justify-between items-center p-2.5 bg-white rounded-xl border border-gray-100 shadow-sm min-w-[120px]">
+                  <span className="font-bold text-gray-700 text-sm">국풍</span>
+                  <div className="flex items-center gap-1.5">
+                    <button onClick={() => {
+                      const winds = ['동', '남', '서', '북'];
+                      setWind(prev => winds[(winds.indexOf(prev) - 1 + 4) % 4]);
+                    }} className="bg-gray-100 w-8 h-8 rounded font-bold hover:bg-gray-200">-</button>
+                    
+                    <span className="font-bold text-lg w-4 text-center text-gray-800">{wind}</span>
+                    
+                    <button onClick={() => {
+                      const winds = ['동', '남', '서', '북'];
+                      setWind(prev => winds[(winds.indexOf(prev) + 1) % 4]);
+                    }} className="bg-gray-100 w-8 h-8 rounded font-bold hover:bg-gray-200">+</button>
                   </div>
                 </div>
-                {/* 국 번호 박스 */}
+
+                {/* 국 번호 박스 ( + - 버튼 및 3인 게임 제한 ) */}
                 <div className="flex-1 flex justify-between items-center p-2.5 bg-white rounded-xl border border-gray-100 shadow-sm min-w-[120px]">
                   <span className="font-bold text-[#2E7D32] text-sm">국</span>
                   <div className="flex items-center gap-1.5">
-                    {/* 💡 국 번호가 변경되면 setHonba(0)으로 본장 동시 초기화 */}
+                    {/* 💡 국 번호 변경 시 본장(honba) 0으로 초기화 */}
                     <button onClick={() => { setRoundNum(Math.max(1, roundNum - 1)); setHonba(0); }} className="bg-gray-100 w-8 h-8 rounded font-bold hover:bg-gray-200">-</button>
                     <span className="font-bold text-lg w-4 text-center text-black">{roundNum}</span>
-                    <button onClick={() => { setRoundNum(Math.min(4, roundNum + 1)); setHonba(0); }} className="bg-gray-100 w-8 h-8 rounded font-bold hover:bg-gray-200">+</button>
+                    <button onClick={() => { 
+                      const maxRound = currentGame?.type === '3인' ? 3 : 4; // 💡 3인 게임은 최대 3국까지만
+                      setRoundNum(Math.min(maxRound, roundNum + 1)); 
+                      setHonba(0); 
+                    }} className="bg-gray-100 w-8 h-8 rounded font-bold hover:bg-gray-200">+</button>
                   </div>
                 </div>
               </div>
