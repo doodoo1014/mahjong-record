@@ -92,7 +92,7 @@ function App() {
   };
 
   const handleLogout = () => { setCurrentUser(null); localStorage.removeItem('mahjong_user'); };
-  const handleApproveUser = async (name) => { await updateDoc(doc(db, 'users', name), { isApproved: true }); }; // 💡 쓰기 권한 승인 함수
+  const handleApproveUser = async (name) => { await updateDoc(doc(db, 'users', name), { isApproved: true }); };
   const handleApproveAdmin = async (name) => { await updateDoc(doc(db, 'users', name), { role: 'admin', pendingAdmin: false, isApproved: true }); };
   const handleRejectAdmin = async (name) => { await updateDoc(doc(db, 'users', name), { pendingAdmin: false }); };
   const handlePromoteAdmin = async (name) => { await updateDoc(doc(db, 'users', name), { role: 'admin' }); };
@@ -103,42 +103,25 @@ function App() {
   const [selectedSeason, setSelectedSeason] = useState('all'); 
   const [isSeasonModalOpen, setIsSeasonModalOpen] = useState(false);
   
-  // 💡 시즌 관리용 확장 상태
   const [newSeasonName, setNewSeasonName] = useState('');
   const [newSeasonStart, setNewSeasonStart] = useState('');
   const [newSeasonEnd, setNewSeasonEnd] = useState('');
-  const [editingSeasonId, setEditingSeasonId] = useState(null); // 수정 모드 판별용
+  const [editingSeasonId, setEditingSeasonId] = useState(null);
 
   const handleSaveSeason = async () => {
     if (!newSeasonName.trim()) return alert("시즌 이름을 입력해주세요.");
-    
     let newSeasonList;
     if (editingSeasonId) {
-      // 기존 시즌 수정
-      newSeasonList = seasons.map(s => 
-        s.id === editingSeasonId ? { ...s, name: newSeasonName, startDate: newSeasonStart, endDate: newSeasonEnd } : s
-      );
+      newSeasonList = seasons.map(s => s.id === editingSeasonId ? { ...s, name: newSeasonName, startDate: newSeasonStart, endDate: newSeasonEnd } : s);
     } else {
-      // 새 시즌 추가
       newSeasonList = [...seasons, { id: `season_${Date.now()}`, name: newSeasonName, startDate: newSeasonStart, endDate: newSeasonEnd }];
     }
-    
     await setDoc(doc(db, 'settings', 'seasons'), { list: newSeasonList });
-    
-    // 입력창 초기화
     setNewSeasonName(''); setNewSeasonStart(''); setNewSeasonEnd(''); setEditingSeasonId(null);
   };
 
-  const handleEditSeasonClick = (season) => {
-    setNewSeasonName(season.name);
-    setNewSeasonStart(season.startDate || '');
-    setNewSeasonEnd(season.endDate || '');
-    setEditingSeasonId(season.id);
-  };
-
-  const handleCancelEditSeason = () => {
-    setNewSeasonName(''); setNewSeasonStart(''); setNewSeasonEnd(''); setEditingSeasonId(null);
-  };
+  const handleEditSeasonClick = (season) => { setNewSeasonName(season.name); setNewSeasonStart(season.startDate || ''); setNewSeasonEnd(season.endDate || ''); setEditingSeasonId(season.id); };
+  const handleCancelEditSeason = () => { setNewSeasonName(''); setNewSeasonStart(''); setNewSeasonEnd(''); setEditingSeasonId(null); };
 
   const displayedGames = games.filter(g => {
     if (activeTab !== '전체' && g.type !== activeTab) return false;
@@ -166,7 +149,7 @@ function App() {
   const [selectedYaku, setSelectedYaku] = useState([]); const [furoDecreased, setFuroDecreased] = useState([]); 
   const [tenpaiPlayers, setTenpaiPlayers] = useState([]); const [nagashiMangan, setNagashiMangan] = useState([]); const [abortiveType, setAbortiveType] = useState(null); 
   const [roundComment, setRoundComment] = useState(''); const [chomboPlayer, setChomboPlayer] = useState(null); 
-  const [editingRoundId, setEditingRoundId] = useState(null); // 💡 수정 모드 식별용 상태
+  const [editingRoundId, setEditingRoundId] = useState(null);
 
   const currentGame = games.find(g => g.id === selectedGameId);
   const records = currentGame ? currentGame.rounds : [];
@@ -176,7 +159,8 @@ function App() {
   const winRecords = records.filter(r => r.type === '화료');
   const tsumoCount = winRecords.filter(r => r.winType === '쯔모').length;
   const ronCount = winRecords.filter(r => r.winType === '론').length;
-  const drawCount = records.filter(r => r.type === '유국').length; // 💡 평균판수 대신 유국 수 계산
+  const drawCount = records.filter(r => r.type === '유국').length; 
+
   useEffect(() => {
     if (recordMode !== '화료') return;
     let calcHan = 0;
@@ -198,6 +182,7 @@ function App() {
   const clickTimeoutRef = useRef(null);
   const lastClickedIndexRef = useRef(null);
   const ignoreClickRef = useRef(false);
+  const yakuTimerRef = useRef(null);
 
   const handlePlayerTouchStart = (index) => { 
     ignoreClickRef.current = false;
@@ -205,19 +190,15 @@ function App() {
       if (winType === '론') { 
         setLoser(index); 
         if (winner === index) setWinner(null); 
-        ignoreClickRef.current = true; // 💡 꾹 누르기(롱프레스)가 발동되면 이어지는 클릭은 무시
+        ignoreClickRef.current = true;
       } 
     }, 500); 
   };
-  const handlePlayerTouchEnd = () => { 
-    if (playerTimerRef.current) clearTimeout(playerTimerRef.current); 
-  };
+  const handlePlayerTouchEnd = () => { if (playerTimerRef.current) clearTimeout(playerTimerRef.current); };
 
   const handlePlayerClick = (index) => {
     if (ignoreClickRef.current) { ignoreClickRef.current = false; return; }
-
     if (clickTimeoutRef.current && lastClickedIndexRef.current === index) {
-      // 💡 0.25초 안에 같은 사람을 또 눌렀을 때 (더블 클릭 -> 방총자 지정)
       clearTimeout(clickTimeoutRef.current);
       clickTimeoutRef.current = null;
       lastClickedIndexRef.current = null;
@@ -226,7 +207,6 @@ function App() {
         if (winner === index) setWinner(null); 
       }
     } else {
-      // 💡 첫 번째 클릭일 때 (0.25초 대기 후 화료자 확정)
       if (clickTimeoutRef.current) clearTimeout(clickTimeoutRef.current);
       lastClickedIndexRef.current = index;
       clickTimeoutRef.current = setTimeout(() => {
@@ -234,10 +214,12 @@ function App() {
         if (loser === index) setLoser(null);
         clickTimeoutRef.current = null;
         lastClickedIndexRef.current = null;
-      }, 250); // 250ms 대기
+      }, 250);
     }
   };
-  const handleWinTypeChange = (type) => { setWinType(type); if (type === '쯔모') setLoser(null); };const yakuTimerRef = useRef(null);
+
+  const handleWinTypeChange = (type) => { setWinType(type); if (type === '쯔모') setLoser(null); };
+  
   const toggleYaku = (yaku) => setSelectedYaku(prev => prev.includes(yaku) ? prev.filter(y => y !== yaku) : [...prev, yaku]);
   const toggleFuroDecrease = (yaku) => { setFuroDecreased(prev => prev.includes(yaku) ? prev.filter(y => y !== yaku) : [...prev, yaku]); setSelectedYaku(prev => prev.includes(yaku) ? prev : [...prev, yaku]); };
   const handleYakuTouchStart = (yaku) => { if (!targetFuroYaku.includes(yaku)) return; yakuTimerRef.current = setTimeout(() => toggleFuroDecrease(yaku), 500); };
@@ -252,34 +234,26 @@ function App() {
     if (gameType === '4인' && (!playerE || !playerS || !playerW || !playerN)) return alert("모든 플레이어 이름을 입력해주세요!");
     if (gameType === '3인' && (!playerE || !playerS || !playerW)) return alert("모든 플레이어 이름을 입력해주세요!");
     
-    // 💡 1. 오늘 날짜를 구해서 YYYY-MM-DD 형태로 변환
     const today = new Date();
     const todayStr = today.getFullYear() + '-' + String(today.getMonth() + 1).padStart(2, '0') + '-' + String(today.getDate()).padStart(2, '0');
     
-    // 💡 2. 시즌 목록을 돌면서 오늘 날짜가 포함되는 시즌 찾기
     let matchedSeasonId = null;
     for (let i = seasons.length - 1; i >= 0; i--) {
       const s = seasons[i];
       if (s.startDate && s.endDate && todayStr >= s.startDate && todayStr <= s.endDate) {
-        matchedSeasonId = s.id;
-        break;
+        matchedSeasonId = s.id; break;
       }
     }
     
-    // 💡 3. 예외 처리: 오늘 날짜가 속한 시즌이 없다면 "프리 시즌"으로 자동 배정
     if (!matchedSeasonId) {
       const preSeason = seasons.find(s => s.name === "프리 시즌");
-      if (preSeason) {
-        matchedSeasonId = preSeason.id; // 프리 시즌이 존재하면 프리 시즌으로 쏙!
-      } else {
-        // 혹시 아직 관리자가 '프리 시즌'을 안 만들어뒀을 때 에러가 나지 않도록 방어 (가장 최근 시즌 배정)
-        matchedSeasonId = seasons[seasons.length - 1].id;
-      }
+      if (preSeason) matchedSeasonId = preSeason.id;
+      else matchedSeasonId = seasons[seasons.length - 1].id;
     }
 
     const newGame = { 
       id: Date.now(), 
-      seasonId: matchedSeasonId, // 찾은 시즌 ID를 자동 부여
+      seasonId: matchedSeasonId,
       date: new Date().toLocaleDateString('ko-KR', { year: 'numeric', month: '2-digit', day: '2-digit' }).replace(/\./g, '.').slice(0, -1), 
       type: gameType, 
       players: gameType === '4인' ? [playerE, playerS, playerW, playerN] : [playerE, playerS, playerW], 
@@ -335,7 +309,6 @@ function App() {
       newRound = { ...newRound, chomboPlayer: players[chomboPlayer] };
     }
     
-    // 수정 모드일 땐 기존 아이디를 찾아 덮어씌우고, 아닐 땐 맨 앞에 추가
     const updatedRounds = editingRoundId 
       ? currentGame.rounds.map(r => r.id === editingRoundId ? newRound : r)
       : [newRound, ...currentGame.rounds];
@@ -343,7 +316,7 @@ function App() {
     await setDoc(doc(db, 'games', selectedGameId.toString()), { ...currentGame, rounds: updatedRounds });
     
     setIsRoundModalOpen(false); setEditingRoundId(null);
-    setWinner(null); setLoser(null); setSelectedYaku([]); setFuroDecreased([]); setDora(0); setAka(0); setUra(0); setPei(0); setTenpaiPlayers([]); setNagashiMangan([]); setAbortiveType(null); setRoundComment(''); setScore(''); setChomboPlayer(null); setChomboType('만관 지불');
+    setWinner(null); setLoser(null); setSelectedYaku([]); setFuroDecreased([]); setDora(0); setAka(0); setUra(0); setPei(0); setTenpaiPlayers([]); setNagashiMangan([]); setAbortiveType(null); setRoundComment(''); setScore(''); setChomboPlayer(null);
   };
 
   const handleDeleteRound = async (roundId) => { if(confirm("이 국의 기록을 삭제하시겠습니까?")) await setDoc(doc(db, 'games', selectedGameId.toString()), { ...currentGame, rounds: currentGame.rounds.filter(r => r.id !== roundId) }); };
@@ -390,9 +363,8 @@ function App() {
   const [statsSubTab, setStatsSubTab] = useState('플레이어'); 
   const [rankingMainTab, setRankingMainTab] = useState('전체'); 
   const [rankingSort, setRankingSort] = useState('totalUma');
-  const [selectedStatPlayerName, setSelectedStatPlayerName] = useState(null); 
-  
-  // 💡 세부 분포 모달 상태
+  const [playerStatTab, setPlayerStatTab] = useState('전체'); 
+  const [selectedStatPlayerName, setSelectedStatPlayerName] = useState(null); // 💡 백지화 에러 방지 (핵심 복구)
   const [breakdownData, setBreakdownData] = useState(null); 
 
   const getFilteredGamesForStats = (typeTab) => {
@@ -450,7 +422,6 @@ function App() {
             winnerStat.waitTypes[round.waitType] = (winnerStat.waitTypes[round.waitType] || 0) + 1;
             round.selectedYaku?.forEach(yaku => { winnerStat.yakus[yaku] = (winnerStat.yakus[yaku] || 0) + 1; });
             
-            // 평균 타점용 합산
             if (round.score && Number(round.score) > 0) {
               winnerStat.totalWinScore += Number(round.score);
               winnerStat.winScoreCount += 1;
@@ -458,7 +429,6 @@ function App() {
           }
           if(round.winType === '론' && round.loser && stats[round.loser]) {
             stats[round.loser].dealInCount += 1;
-            // 평균 방총점용 합산
             if (round.score && Number(round.score) > 0) {
               stats[round.loser].totalDealInScore += Number(round.score);
               stats[round.loser].dealInScoreCount += 1;
@@ -495,7 +465,6 @@ function App() {
   const playerStatsList = useMemo(() => generatePlayerStats(statsGames).sort((a,b) => b.winCount - a.winCount), [statsGames]);
   const selectedStatPlayer = playerStatsList.find(p => p.name === selectedStatPlayerName);
 
-  // 💡 모달 데이터 생성 헬퍼 함수
   const openBreakdown = (title, type, key) => {
     const data = playerStatsList.map(p => {
       let count = 0;
@@ -546,12 +515,10 @@ function App() {
       else if (rankingSort === 'rentaiRate') diff = parseFloat(b.rentaiRate) - parseFloat(a.rentaiRate);
       else if (rankingSort === 'tobiRate') diff = parseFloat(a.tobiRate) - parseFloat(b.tobiRate); 
       
-      // 💡 동점 시 가나다순 정렬
       if (diff === 0) return a.name.localeCompare(b.name);
       return diff;
     });
 
-    // 💡 공동 순위 로직 (1, 2, 2, 4...)
     let currentRank = 1;
     return sorted.map((player, index, arr) => {
       if (index > 0) {
@@ -577,10 +544,8 @@ function App() {
   return (
     <div className="flex flex-col h-screen bg-[#F5F5DC] font-sans relative overflow-hidden text-[#1A1A1A]">
       
-      {/* 💡 전체 영역이 스크롤되도록 main 태그로 헤더부터 감쌉니다 */}
       <main className="flex-1 overflow-y-auto flex flex-col relative pb-24">
         
-      {/* 🚀 상단 헤더 */}
       <header className="bg-[#2E7D32] text-white p-4 pt-10 shadow-md z-20 shrink-0">
         <div className="flex items-center justify-between mb-3 min-h-[36px]">
           {activeNav === '기록' && selectedGameId !== null ? (
@@ -621,7 +586,6 @@ function App() {
         )}
       </header>
 
-      {/* 상단 탭 (기록 화면 메인에서만 노출) */}
       {activeNav === '기록' && selectedGameId === null && (
         <div className="flex bg-white border-b border-gray-200 shadow-sm z-10 shrink-0">
           {['전체', '4인', '3인'].map(t => (
@@ -632,7 +596,6 @@ function App() {
         </div>
       )}
 
-      {/* 🔍 검색창 (기록 메인) */}
       {activeNav === '기록' && selectedGameId === null && (
         <div className="p-4 pb-0 bg-[#F5F5DC] shrink-0">
           <div className="relative">
@@ -642,8 +605,6 @@ function App() {
         </div>
       )}
 
-      {/* <main className="flex-1 overflow-y-auto flex flex-col relative pb-24"> */}
-        
         {/* ========================================= */}
         {/* 화면 1: 대국 기록 메인 리스트 */}
         {/* ========================================= */}
@@ -764,7 +725,6 @@ function App() {
                 records.map(record => (
                   <div key={record.id} className={`rounded-xl shadow-sm border relative overflow-hidden animate-in fade-in slide-in-from-bottom-2 ${record.type === '촌보' ? 'bg-red-50 border-red-200' : record.type === '유국' ? 'bg-gray-50 border-gray-300' : 'bg-white border-gray-100'}`}>
                     
-                    {/* 💡 카드 타이틀 (헤더) 영역 추가 */}
                     <div className={`px-3 py-2 border-b flex justify-between items-center ${record.type === '촌보' ? 'bg-red-100 border-red-200' : record.type === '유국' ? 'bg-gray-200 border-gray-300' : 'bg-gray-100 border-gray-200'}`}>
                       <span className={`font-bold text-sm ${record.type === '촌보' ? 'text-red-800' : 'text-gray-700'}`}>
                         {record.wind}{record.roundNum}국 {record.honba > 0 && `${record.honba}본장`}
@@ -773,14 +733,12 @@ function App() {
                       </span>
                       {canWrite && (
                         <div className="flex items-center gap-2">
-                          {/* 💡 연필 아이콘 추가 */}
                           <button onClick={() => handleEditRound(record)} className="text-gray-400 hover:text-blue-500 transition-colors"><Edit size={14} /></button>
                           <button onClick={() => handleDeleteRound(record.id)} className="text-gray-400 hover:text-red-500 transition-colors"><Trash2 size={14} /></button>
                         </div>
                       )}
                     </div>
 
-                    {/* 💡 카드 본문 영역 */}
                     <div className="p-3 pt-2.5">
                       {record.type === '화료' ? (
                         <>
@@ -801,7 +759,6 @@ function App() {
             </div>
             {currentGame.status === '진행중' && canWrite && (
               <div className="fixed bottom-20 right-6 z-20">
-                {/* 💡 버튼을 눌렀을 때 초기화 함수 호출로 변경 */}
                 <button onClick={handleOpenNewRound} className="bg-[#2E7D32] text-white p-4 rounded-full shadow-lg hover:bg-green-800 active:scale-95 transition-transform"><Plus size={28} strokeWidth={3} /></button>
               </div>
             )}
@@ -997,8 +954,6 @@ function App() {
                             <h3 className="font-bold text-base text-gray-800 leading-tight">{player.name}</h3>
                             <div className="text-[10px] text-gray-500 font-bold mt-1 flex gap-1.5 items-center">
                               <span className="bg-gray-100 px-1.5 py-0.5 rounded">{player.gamesPlayed}국</span>
-                              {/* <span className="bg-green-50 text-green-700 px-1.5 py-0.5 rounded">1위 {player.firstRate}%</span>
-                              <span className="bg-orange-50 text-orange-700 px-1.5 py-0.5 rounded">연대 {player.rentaiRate}%</span> */}
                             </div>
                           </div>
                         </div>
@@ -1066,117 +1021,219 @@ function App() {
       )}
 
       {/* ========================================= */}
-      {/* 👤 개인 통계 상세 모달 (Player Detail) */}
+      {/* 개인 통계 상세 모달 (Player Detail) */}
       {/* ========================================= */}
       {selectedStatPlayer && (
         <div className="absolute inset-0 bg-black bg-opacity-70 z-[90] flex flex-col justify-end animate-in fade-in">
-          <div className="bg-[#F5F5DC] w-full h-[90%] rounded-t-3xl shadow-2xl flex flex-col animate-in slide-in-from-bottom">
-            <div className="bg-[#1e293b] rounded-t-3xl p-4 flex justify-between items-center text-white">
-              <div>
-                <h2 className="text-xl font-bold flex items-center gap-2"><PieChart size={20}/> {selectedStatPlayer.name}</h2>
-                <select value={selectedSeason} onChange={(e) => setSelectedSeason(e.target.value)} className="bg-gray-700 text-white text-[10px] font-bold py-1 px-2 mt-1 rounded appearance-none focus:outline-none">
-                  <option value="all">전체 시즌</option>
-                  {seasons.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                </select>
-              </div>
-              <button onClick={() => setSelectedStatPlayerName(null)} className="p-1.5 hover:bg-gray-700 rounded-full transition-colors bg-gray-800"><X size={20}/></button>
-            </div>
-            
-            <div className="flex-1 overflow-y-auto p-4 space-y-4">
-              <div className="grid grid-cols-2 gap-3">
-                <div className="bg-white p-3 rounded-xl shadow-sm border border-gray-200 text-center"><span className="block text-[10px] text-gray-500 font-bold mb-1">대국 수</span><span className="text-xl font-black text-gray-800">{selectedStatPlayer.gamesPlayed}국</span></div>
-                <div className="bg-green-50 p-3 rounded-xl shadow-sm border border-green-200 text-center"><span className="block text-[10px] text-green-700 font-bold mb-1">현재 우마</span><span className={`text-xl font-black ${selectedStatPlayer.totalUma > 0 ? 'text-[#2E7D32]' : selectedStatPlayer.totalUma < 0 ? 'text-red-500' : 'text-gray-800'}`}>{selectedStatPlayer.totalUma > 0 ? '+' : ''}{selectedStatPlayer.totalUma.toFixed(1)}</span></div>
-              </div>
+          {(() => {
+            const modalGames = games.filter(g => 
+              g.status === '종료' && 
+              g.players.includes(selectedStatPlayer.name) && 
+              (playerStatTab === '전체' || g.type === playerStatTab) &&
+              (selectedSeason === 'all' || g.seasonId === selectedSeason)
+            );
 
-              <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
-                <h3 className="text-sm font-bold text-gray-800 mb-3 flex items-center gap-1.5"><BarChart size={16}/> 상세 통계</h3>
-                <div className="grid grid-cols-4 gap-2 text-center text-sm font-medium mb-3">
-                  <div className="flex flex-col gap-1"><span className="text-[10px] text-gray-500 font-bold">화료수</span><span className="font-black text-[#2E7D32]">{selectedStatPlayer.winCount}회</span></div>
-                  <div className="flex flex-col gap-1"><span className="text-[10px] text-gray-500 font-bold">방총수</span><span className="font-black text-orange-500">{selectedStatPlayer.dealInCount}회</span></div>
-                  <div className="flex flex-col gap-1"><span className="text-[10px] text-gray-500 font-bold">역만수</span><span className="font-black text-red-600">{selectedStatPlayer.yakumanCount}회</span></div>
-                  <div className="flex flex-col gap-1"><span className="text-[10px] text-gray-500 font-bold">쵼보수</span><span className="font-black text-purple-600">{selectedStatPlayer.chomboCount}회</span></div>
-                </div>
+            let playCount = 0, tScore = 0, tUma = 0, tRank = 0;
+            let ranks = [0, 0, 0, 0];
+            let wCount = 0, wScore = 0, dCount = 0, dScore = 0, mHonba = 0;
+            let maxScore = -99999, minScore = 99999;
+            let tobiCount = 0, yakumanCount = 0, chomboCount = 0;
+            let yakus = {};
+            let waitTypes = {};
+            let menzenTsumo = 0, menzenRon = 0, furoTsumo = 0, furoRon = 0;
+            let riichiWinCount = 0, damaWinCount = 0, furoWinCount = 0;
 
-                <div className="grid grid-cols-4 gap-2 text-center text-sm font-medium mb-3 bg-gray-50 p-2 rounded-lg">
-                  {[1, 2, 3, 4].map(rank => {
-                    const count = selectedStatPlayer.ranks[rank-1];
-                    const pct = selectedStatPlayer.gamesPlayed > 0 ? ((count / selectedStatPlayer.gamesPlayed) * 100).toFixed(0) : 0;
-                    return (
-                      <div key={rank} className="flex flex-col gap-0.5"><span className="text-[10px] font-bold text-gray-600">{rank}등수</span><span className="font-black text-gray-800">{count}회</span><span className="text-[9px] text-gray-400">({pct}%)</span></div>
-                    )
-                  })}
-                </div>
+            modalGames.forEach(g => {
+                const pIdx = g.players.indexOf(selectedStatPlayer.name);
+                if(g.finalResults && g.finalResults[pIdx]) {
+                    // 💡 순위를 점수 기반으로 실시간 계산 (db에 rank가 직접 저장되지 않으므로)
+                    const sortedResults = g.finalResults.map((r, i) => ({ score: Number(r.score), originalIndex: i })).sort((a, b) => b.score - a.score);
+                    const myRankIndex = sortedResults.findIndex(r => r.originalIndex === pIdx);
+                    
+                    const finalScore = Number(g.finalResults[pIdx].score);
+                    const finalPt = Number(g.finalResults[pIdx].pt); // 💡 uma가 아니라 pt 속성을 참조해야 함
 
-                <div className="grid grid-cols-2 gap-2 text-center text-sm font-medium">
-                  <div className="flex flex-col gap-1 border border-blue-100 bg-blue-50 py-2 rounded-lg"><span className="text-[10px] text-blue-700 font-bold">연대율</span><span className="font-black text-blue-600 text-base">{selectedStatPlayer.rentaiRate}%</span></div>
-                  <div className="flex flex-col gap-1 border border-slate-200 bg-slate-50 py-2 rounded-lg"><span className="text-[10px] text-slate-600 font-bold">들통율 (토비)</span><span className="font-black text-slate-700 text-base">{selectedStatPlayer.tobiCount}회 <span className="text-xs font-medium">({selectedStatPlayer.tobiRate}%)</span></span></div>
-                </div>
-              </div>
+                    tScore += finalScore;
+                    tUma += finalPt;
+                    tRank += (myRankIndex + 1);
+                    ranks[myRankIndex] += 1;
+                    playCount++;
+                    
+                    if (finalScore > maxScore) maxScore = finalScore;
+                    if (finalScore < minScore) minScore = finalScore;
+                    if (finalScore < 0) tobiCount++;
+                }
+                g.rounds.forEach(r => {
+                    if(r.type === '촌보' && r.chomboPlayer === selectedStatPlayer.name) chomboCount++;
+                    if(r.type === '화료' && r.winner === selectedStatPlayer.name) {
+                        wCount++;
+                        const s = parseInt(String(r.score||'0').replace(/[^0-9]/g, ''), 10);
+                        if(s > 0) wScore += s;
+                        if(r.honba > mHonba) mHonba = r.honba;
+                        
+                        if (r.selectedYaku && r.selectedYaku.some(y => yakuData['역만']?.includes(y) || yakuData['더블역만']?.includes(y))) yakumanCount++;
 
-              <div className="grid grid-cols-4 gap-2 text-center">
-                <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-2"><span className="block text-[9px] text-gray-500 font-bold mb-1">최고 점수</span><span className="text-sm font-black text-gray-800">{selectedStatPlayer.maxScore === -99999 ? '-' : Number(selectedStatPlayer.maxScore).toLocaleString()}</span></div>
-                <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-2"><span className="block text-[9px] text-gray-500 font-bold mb-1">최소 점수</span><span className="text-sm font-black text-gray-800">{selectedStatPlayer.minScore === 99999 ? '-' : Number(selectedStatPlayer.minScore).toLocaleString()}</span></div>
-                <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-2"><span className="block text-[9px] text-gray-500 font-bold mb-1">평균 소점</span><span className="text-sm font-black text-gray-800">{Number(selectedStatPlayer.avgScore).toLocaleString()}</span></div>
-                <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-2"><span className="block text-[9px] text-gray-500 font-bold mb-1">평균 타점</span><span className="text-sm font-black text-[#2E7D32]">{Number(selectedStatPlayer.avgWinScore).toLocaleString()}점</span></div>
-                <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-2"><span className="block text-[9px] text-gray-500 font-bold mb-1">평균 순위</span><span className="text-sm font-black text-amber-600">{selectedStatPlayer.avgRank}위</span></div>
-                <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-2"><span className="block text-[9px] text-gray-500 font-bold mb-1">평균 우마</span><span className="text-sm font-black text-gray-800">{selectedStatPlayer.avgUma}</span></div>
-                <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-2"><span className="block text-[9px] text-gray-500 font-bold mb-1">최대 연장</span><span className="text-sm font-black text-gray-800">{selectedStatPlayer.maxHonba}본장</span></div>
-                <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-2"><span className="block text-[9px] text-gray-500 font-bold mb-1">평균 방총점</span><span className="text-sm font-black text-orange-500">{Number(selectedStatPlayer.avgDealInScore).toLocaleString()}점</span></div>
-              </div>
+                        if (r.selectedYaku) {
+                            r.selectedYaku.forEach(y => {
+                                yakus[y] = (yakus[y] || 0) + 1;
+                                if (y === '리치' || y === '더블리치') riichiWinCount++;
+                            });
+                        }
+                        
+                        if (r.waitType) waitTypes[r.waitType] = (waitTypes[r.waitType] || 0) + 1;
 
-              <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
-                <h3 className="text-sm font-bold text-gray-800 mb-3">모든 사용 역 현황</h3>
-                {Object.keys(selectedStatPlayer.yakus).length === 0 ? <p className="text-xs text-gray-400">기록된 역이 없습니다.</p> : (
-                  <div className="flex flex-wrap gap-1.5">
-                    {Object.entries(selectedStatPlayer.yakus).sort((a,b)=>b[1]-a[1]).map(([yaku, count]) => (
-                      <span key={yaku} className="bg-green-50 text-green-800 border border-green-200 px-2 py-1 rounded text-[10px] font-bold">{yaku} <span className="text-green-500 ml-0.5">{count}</span></span>
-                    ))}
+                        const isMenzen = r.menzen === '멘젠';
+                        if (isMenzen && r.winType === '쯔모') menzenTsumo++;
+                        if (isMenzen && r.winType === '론') menzenRon++;
+                        if (!isMenzen && r.winType === '쯔모') furoTsumo++;
+                        if (!isMenzen && r.winType === '론') furoRon++;
+                        
+                        if (!isMenzen) furoWinCount++;
+                        if (isMenzen && r.selectedYaku && !r.selectedYaku.includes('리치') && !r.selectedYaku.includes('더블리치')) damaWinCount++;
+                    }
+                    if(r.type === '화료' && r.winType === '론' && r.loser === selectedStatPlayer.name) {
+                        dCount++;
+                        const s = parseInt(String(r.score||'0').replace(/[^0-9]/g, ''), 10);
+                        if(s > 0) dScore += s;
+                    }
+                });
+            });
+
+            const mStat = {
+                gamesPlayed: playCount, totalUma: tUma, winCount: wCount, dealInCount: dCount, 
+                yakumanCount, chomboCount, ranks, tobiCount,
+                tobiRate: playCount > 0 ? ((tobiCount / playCount) * 100).toFixed(1) : 0,
+                rentaiRate: playCount > 0 ? (((ranks[0] + ranks[1]) / playCount) * 100).toFixed(1) : 0,
+                maxScore, minScore, 
+                avgScore: playCount > 0 ? Math.floor(tScore / playCount) : 0,
+                avgWinScore: wCount > 0 ? Math.floor(wScore / wCount) : 0,
+                avgRank: playCount > 0 ? (tRank / playCount).toFixed(2) : 0,
+                avgUma: playCount > 0 ? (tUma / playCount).toFixed(1) : 0,
+                maxHonba: mHonba, avgDealInScore: dCount > 0 ? Math.floor(dScore / dCount) : 0,
+                yakus, riichiWinCount, damaWinCount, furoWinCount, menzenTsumo, menzenRon, furoTsumo, furoRon, waitTypes
+            };
+
+            return (
+              <div className="bg-[#F5F5DC] w-full h-[90%] rounded-t-3xl shadow-2xl flex flex-col animate-in slide-in-from-bottom">
+                <div className="bg-[#1e293b] rounded-t-3xl p-4 flex justify-between items-center text-white shrink-0">
+                  <div>
+                    <h2 className="text-xl font-bold flex items-center gap-2"><PieChart size={20}/> {selectedStatPlayer.name}</h2>
+                    <select value={selectedSeason} onChange={(e) => setSelectedSeason(e.target.value)} className="bg-gray-700 text-white text-[10px] font-bold py-1 px-2 mt-1 rounded appearance-none focus:outline-none">
+                      <option value="all">전체 시즌</option>
+                      {seasons.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                    </select>
                   </div>
-                )}
-              </div>
+                  <button onClick={() => setSelectedStatPlayerName(null)} className="p-1.5 hover:bg-gray-700 rounded-full transition-colors bg-gray-800"><X size={20}/></button>
+                </div>
+                
+                <div className="flex bg-white border-b border-gray-200 shadow-sm shrink-0">
+                  {['전체', '4인', '3인'].map(tab => (
+                    <button key={tab} onClick={() => setPlayerStatTab(tab)} className={`flex-1 py-3 text-sm font-bold transition-colors ${playerStatTab === tab ? 'text-[#2E7D32] border-b-2 border-[#2E7D32]' : 'text-gray-400 hover:text-gray-600'}`}>
+                      {tab}
+                    </button>
+                  ))}
+                </div>
+                
+                <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="bg-white p-3 rounded-xl shadow-sm border border-gray-200 text-center"><span className="block text-[10px] text-gray-500 font-bold mb-1">대국 수</span><span className="text-xl font-black text-gray-800">{mStat.gamesPlayed}국</span></div>
+                    <div className="bg-green-50 p-3 rounded-xl shadow-sm border border-green-200 text-center"><span className="block text-[10px] text-green-700 font-bold mb-1">현재 우마</span><span className={`text-xl font-black ${mStat.totalUma > 0 ? 'text-[#2E7D32]' : mStat.totalUma < 0 ? 'text-red-500' : 'text-gray-800'}`}>{mStat.totalUma > 0 ? '+' : ''}{mStat.totalUma.toFixed(1)}</span></div>
+                  </div>
 
-              <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
-                <h3 className="text-sm font-bold text-gray-800 mb-3">화료 형태별 비율</h3>
-                <div className="grid grid-cols-3 gap-2 mb-4 bg-gray-50 p-2 rounded-lg text-center">
-                  <div><span className="block text-[10px] font-bold text-red-600 mb-0.5">리치 화료율</span><span className="text-sm font-black">{selectedStatPlayer.winCount>0?((selectedStatPlayer.riichiWinCount/selectedStatPlayer.winCount)*100).toFixed(0):0}%</span><span className="block text-[9px] text-gray-400">({selectedStatPlayer.riichiWinCount}회)</span></div>
-                  <div><span className="block text-[10px] font-bold text-gray-600 mb-0.5">다마 화료율</span><span className="text-sm font-black">{selectedStatPlayer.winCount>0?((selectedStatPlayer.damaWinCount/selectedStatPlayer.winCount)*100).toFixed(0):0}%</span><span className="block text-[9px] text-gray-400">({selectedStatPlayer.damaWinCount}회)</span></div>
-                  <div><span className="block text-[10px] font-bold text-blue-600 mb-0.5">후로 화료율</span><span className="text-sm font-black">{selectedStatPlayer.winCount>0?((selectedStatPlayer.furoWinCount/selectedStatPlayer.winCount)*100).toFixed(0):0}%</span><span className="block text-[9px] text-gray-400">({selectedStatPlayer.furoWinCount}회)</span></div>
-                </div>
-                <div className="space-y-2">
-                  {[
-                    { label: '멘젠 쯔모', count: selectedStatPlayer.menzenTsumo, color: 'bg-green-500' },
-                    { label: '멘젠 론', count: selectedStatPlayer.menzenRon, color: 'bg-[#2E7D32]' },
-                    { label: '비멘젠 쯔모', count: selectedStatPlayer.furoTsumo, color: 'bg-blue-400' },
-                    { label: '비멘젠 론', count: selectedStatPlayer.furoRon, color: 'bg-orange-400' }
-                  ].map(w => {
-                    const pct = selectedStatPlayer.winCount > 0 ? ((w.count / selectedStatPlayer.winCount) * 100).toFixed(1) : 0;
-                    return (
-                      <div key={w.label}>
-                        <div className="flex justify-between text-[10px] font-bold text-gray-700 mb-0.5"><span>{w.label}</span><span>{w.count}회 ({pct}%)</span></div>
-                        <div className="h-2 bg-gray-100 rounded-full overflow-hidden"><div className={`h-full ${w.color}`} style={{width: `${pct}%`}}></div></div>
-                      </div>
-                    )
-                  })}
-                </div>
-              </div>
+                  <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
+                    <h3 className="text-sm font-bold text-gray-800 mb-3 flex items-center gap-1.5"><BarChart size={16}/> 상세 통계</h3>
+                    <div className="grid grid-cols-4 gap-2 text-center text-sm font-medium mb-3">
+                      <div className="flex flex-col gap-1"><span className="text-[10px] text-gray-500 font-bold">화료수</span><span className="font-black text-[#2E7D32]">{mStat.winCount}회</span></div>
+                      <div className="flex flex-col gap-1"><span className="text-[10px] text-gray-500 font-bold">방총수</span><span className="font-black text-orange-500">{mStat.dealInCount}회</span></div>
+                      <div className="flex flex-col gap-1"><span className="text-[10px] text-gray-500 font-bold">역만수</span><span className="font-black text-red-600">{mStat.yakumanCount}회</span></div>
+                      <div className="flex flex-col gap-1"><span className="text-[10px] text-gray-500 font-bold">쵼보수</span><span className="font-black text-purple-600">{mStat.chomboCount}회</span></div>
+                    </div>
 
-              <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 mb-4">
-                <h3 className="text-sm font-bold text-gray-800 mb-3">대기 형태별 비율</h3>
-                <div className="space-y-2">
-                  {['양면', '샤보', '간짱', '변짱', '단기', '특수대기'].map(w => {
-                    const c = selectedStatPlayer.waitTypes[w] || 0;
-                    const pct = selectedStatPlayer.winCount > 0 ? ((c / selectedStatPlayer.winCount) * 100).toFixed(1) : 0;
-                    return (
-                      <div key={w}>
-                        <div className="flex justify-between text-[10px] font-bold text-gray-700 mb-0.5"><span>{w}</span><span>{c}회 ({pct}%)</span></div>
-                        <div className="h-2 bg-gray-100 rounded-full overflow-hidden"><div className="h-full bg-gray-600" style={{width: `${pct}%`}}></div></div>
+                    <div className={`grid ${playerStatTab === '3인' ? 'grid-cols-3' : 'grid-cols-4'} gap-2 text-center text-sm font-medium mb-3 bg-gray-50 p-2 rounded-lg`}>
+                      {[1, 2, 3, 4].map(rank => {
+                        if (playerStatTab === '3인' && rank === 4) return null;
+                        const count = mStat.ranks[rank-1];
+                        const pct = mStat.gamesPlayed > 0 ? ((count / mStat.gamesPlayed) * 100).toFixed(0) : 0;
+                        return (
+                          <div key={rank} className="flex flex-col gap-0.5"><span className="text-[10px] font-bold text-gray-600">{rank}등수</span><span className="font-black text-gray-800">{count}회</span><span className="text-[9px] text-gray-400">({pct}%)</span></div>
+                        )
+                      })}
+                    </div>
+
+                    <div className={`grid ${playerStatTab === '3인' ? 'grid-cols-1' : 'grid-cols-2'} gap-2 text-center text-sm font-medium`}>
+                      {playerStatTab !== '3인' && (
+                        <div className="flex flex-col gap-1 border border-blue-100 bg-blue-50 py-2 rounded-lg"><span className="text-[10px] text-blue-700 font-bold">연대율</span><span className="font-black text-blue-600 text-base">{mStat.rentaiRate}%</span></div>
+                      )}
+                      <div className="flex flex-col gap-1 border border-slate-200 bg-slate-50 py-2 rounded-lg"><span className="text-[10px] text-slate-600 font-bold">들통율 (토비)</span><span className="font-black text-slate-700 text-base">{mStat.tobiCount}회 <span className="text-xs font-medium">({mStat.tobiRate}%)</span></span></div>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-4 gap-2 text-center">
+                    <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-2"><span className="block text-[9px] text-gray-500 font-bold mb-1">최고 점수</span><span className="text-sm font-black text-gray-800">{mStat.maxScore === -99999 ? '-' : Number(mStat.maxScore).toLocaleString()}</span></div>
+                    <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-2"><span className="block text-[9px] text-gray-500 font-bold mb-1">최소 점수</span><span className="text-sm font-black text-gray-800">{mStat.minScore === 99999 ? '-' : Number(mStat.minScore).toLocaleString()}</span></div>
+                    <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-2"><span className="block text-[9px] text-gray-500 font-bold mb-1">평균 소점</span><span className="text-sm font-black text-gray-800">{Number(mStat.avgScore).toLocaleString()}</span></div>
+                    <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-2"><span className="block text-[9px] text-gray-500 font-bold mb-1">평균 타점</span><span className="text-sm font-black text-[#2E7D32]">{Number(mStat.avgWinScore).toLocaleString()}점</span></div>
+                    <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-2"><span className="block text-[9px] text-gray-500 font-bold mb-1">평균 순위</span><span className="text-sm font-black text-amber-600">{mStat.avgRank}위</span></div>
+                    <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-2"><span className="block text-[9px] text-gray-500 font-bold mb-1">평균 우마</span><span className="text-sm font-black text-gray-800">{mStat.avgUma}</span></div>
+                    <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-2"><span className="block text-[9px] text-gray-500 font-bold mb-1">최대 연장</span><span className="text-sm font-black text-gray-800">{mStat.maxHonba}본장</span></div>
+                    <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-2"><span className="block text-[9px] text-gray-500 font-bold mb-1">평균 방총점</span><span className="text-sm font-black text-orange-500">{Number(mStat.avgDealInScore).toLocaleString()}점</span></div>
+                  </div>
+
+                  <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
+                    <h3 className="text-sm font-bold text-gray-800 mb-3">모든 사용 역 현황</h3>
+                    {Object.keys(mStat.yakus).length === 0 ? <p className="text-xs text-gray-400">기록된 역이 없습니다.</p> : (
+                      <div className="flex flex-wrap gap-1.5">
+                        {Object.entries(mStat.yakus).sort((a,b)=>b[1]-a[1]).map(([yaku, count]) => (
+                          <span key={yaku} className="bg-green-50 text-green-800 border border-green-200 px-2 py-1 rounded text-[10px] font-bold">{yaku} <span className="text-green-500 ml-0.5">{count}</span></span>
+                        ))}
                       </div>
-                    )
-                  })}
+                    )}
+                  </div>
+
+                  <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
+                    <h3 className="text-sm font-bold text-gray-800 mb-3">화료 형태별 비율</h3>
+                    <div className="grid grid-cols-3 gap-2 mb-4 bg-gray-50 p-2 rounded-lg text-center">
+                      <div><span className="block text-[10px] font-bold text-red-600 mb-0.5">리치 화료율</span><span className="text-sm font-black">{mStat.winCount>0?((mStat.riichiWinCount/mStat.winCount)*100).toFixed(0):0}%</span><span className="block text-[9px] text-gray-400">({mStat.riichiWinCount}회)</span></div>
+                      <div><span className="block text-[10px] font-bold text-gray-600 mb-0.5">다마 화료율</span><span className="text-sm font-black">{mStat.winCount>0?((mStat.damaWinCount/mStat.winCount)*100).toFixed(0):0}%</span><span className="block text-[9px] text-gray-400">({mStat.damaWinCount}회)</span></div>
+                      <div><span className="block text-[10px] font-bold text-blue-600 mb-0.5">후로 화료율</span><span className="text-sm font-black">{mStat.winCount>0?((mStat.furoWinCount/mStat.winCount)*100).toFixed(0):0}%</span><span className="block text-[9px] text-gray-400">({mStat.furoWinCount}회)</span></div>
+                    </div>
+                    <div className="space-y-2">
+                      {[
+                        { label: '멘젠 쯔모', count: mStat.menzenTsumo, color: 'bg-green-500' },
+                        { label: '멘젠 론', count: mStat.menzenRon, color: 'bg-[#2E7D32]' },
+                        { label: '비멘젠 쯔모', count: mStat.furoTsumo, color: 'bg-blue-400' },
+                        { label: '비멘젠 론', count: mStat.furoRon, color: 'bg-orange-400' }
+                      ].map(w => {
+                        const pct = mStat.winCount > 0 ? ((w.count / mStat.winCount) * 100).toFixed(1) : 0;
+                        return (
+                          <div key={w.label}>
+                            <div className="flex justify-between text-[10px] font-bold text-gray-700 mb-0.5"><span>{w.label}</span><span>{w.count}회 ({pct}%)</span></div>
+                            <div className="h-2 bg-gray-100 rounded-full overflow-hidden"><div className={`h-full ${w.color}`} style={{width: `${pct}%`}}></div></div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+
+                  <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 mb-4">
+                    <h3 className="text-sm font-bold text-gray-800 mb-3">대기 형태별 비율</h3>
+                    <div className="space-y-2">
+                      {['양면', '샤보', '간짱', '변짱', '단기', '특수대기'].map(w => {
+                        const c = mStat.waitTypes[w] || 0;
+                        const pct = mStat.winCount > 0 ? ((c / mStat.winCount) * 100).toFixed(1) : 0;
+                        return (
+                          <div key={w}>
+                            <div className="flex justify-between text-[10px] font-bold text-gray-700 mb-0.5"><span>{w}</span><span>{c}회 ({pct}%)</span></div>
+                            <div className="h-2 bg-gray-100 rounded-full overflow-hidden"><div className="h-full bg-gray-600" style={{width: `${pct}%`}}></div></div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
                 </div>
               </div>
-            </div>
-          </div>
+            );
+          })()}
         </div>
       )}
 
@@ -1291,19 +1348,15 @@ function App() {
         <div className="absolute inset-0 bg-[#F5F5DC] z-50 flex flex-col overflow-hidden animate-in slide-in-from-bottom">
           <div className="bg-[#2E7D32] text-white p-4 flex justify-between items-center pt-10 shadow-sm z-10">
             <button onClick={() => setIsRoundModalOpen(false)}><ChevronLeft size={28} /></button>
-            {/* 💡 수정 모드일 때는 '기록 수정'으로 표시되도록 제목 변경 */}
             <h2 className="text-xl font-bold">{editingRoundId ? '기록 수정' : `${wind}${roundNum}국 기록`}</h2>
             <button onClick={handleSaveRound} className="text-sm font-bold bg-green-700 px-3 py-1 rounded hover:bg-green-600">저장</button>
           </div>
           <div className="flex bg-white shadow-sm z-10 text-sm"><button onClick={() => setRecordMode('화료')} className={`flex-1 py-4 font-bold border-b-4 transition-colors ${recordMode === '화료' ? 'border-[#2E7D32] text-[#2E7D32]' : 'border-transparent text-gray-400'}`}>화료</button><button onClick={() => setRecordMode('유국')} className={`flex-1 py-4 font-bold border-b-4 transition-colors ${recordMode === '유국' ? 'border-gray-600 text-gray-700' : 'border-transparent text-gray-400'}`}>유국</button><button onClick={() => setRecordMode('촌보')} className={`flex-1 py-4 font-bold border-b-4 transition-colors ${recordMode === '촌보' ? 'border-red-500 text-red-600' : 'border-transparent text-gray-400'}`}>촌보</button></div>
           <div className="flex-1 overflow-y-auto p-4 space-y-8 pb-32">
             <section className="space-y-3">
-              {/* 💡 소제목 추가 */}
               <h3 className="font-bold text-base text-gray-800 border-b pb-1">국 / 본장 / 공탁</h3>
               
-              {/* 💡 국풍과 국 번호를 2개의 개별 흰색 박스로 분리 (본장/공탁과 동일한 스타일) */}
               <div className="flex flex-wrap gap-3">
-                {/* 국풍 박스 ( < > 버튼으로 순환 ) */}
                 <div className="flex-1 flex justify-between items-center p-2.5 bg-white rounded-xl border border-gray-100 shadow-sm min-w-[120px]">
                   <span className="font-bold text-green-700 text-sm">국풍</span>
                   <div className="flex items-center gap-1.5">
@@ -1321,15 +1374,13 @@ function App() {
                   </div>
                 </div>
 
-                {/* 국 번호 박스 ( + - 버튼 및 3인 게임 제한 ) */}
                 <div className="flex-1 flex justify-between items-center p-2.5 bg-white rounded-xl border border-gray-100 shadow-sm min-w-[120px]">
                   <span className="font-bold text-[#2E7D32] text-sm">국</span>
                   <div className="flex items-center gap-1.5">
-                    {/* 💡 국 번호 변경 시 본장(honba) 0으로 초기화 */}
                     <button onClick={() => { setRoundNum(Math.max(1, roundNum - 1)); setHonba(0); }} className="bg-gray-100 w-8 h-8 rounded font-bold hover:bg-gray-200">-</button>
                     <span className="font-bold text-lg w-4 text-center text-black">{roundNum}</span>
                     <button onClick={() => { 
-                      const maxRound = currentGame?.type === '3인' ? 3 : 4; // 💡 3인 게임은 최대 3국까지만
+                      const maxRound = currentGame?.type === '3인' ? 3 : 4;
                       setRoundNum(Math.min(maxRound, roundNum + 1)); 
                       setHonba(0); 
                     }} className="bg-gray-100 w-8 h-8 rounded font-bold hover:bg-gray-200">+</button>
@@ -1371,7 +1422,6 @@ function App() {
                     <div className="flex-1 flex justify-between p-3 bg-white rounded-xl border border-gray-100 items-center">
                       <span className="font-bold text-[#2E7D32] text-sm">부수</span>
                       <div className="flex items-center gap-2">
-                        {/* 💡 산술 계산 대신 fuList 배열의 인덱스를 찾아 이전/다음 값을 반환하도록 수정 */}
                         <button onClick={() => setFu(prev => fuList[Math.max(0, fuList.indexOf(prev) - 1)])} className="bg-gray-100 w-8 h-8 rounded font-bold hover:bg-gray-200">-</button>
                         <span className="font-bold text-lg w-6 text-center">{fu}</span>
                         <button onClick={() => setFu(prev => fuList[Math.min(fuList.length - 1, fuList.indexOf(prev) + 1)])} className="bg-gray-100 w-8 h-8 rounded font-bold hover:bg-gray-200">+</button>
@@ -1387,7 +1437,7 @@ function App() {
                       </div>
                     </div>
                   </div>
-                  <input type="number" inputMode="numeric" placeholder="화료 점수 직접 입력 (선택사항, 예: 8000)" value={score} onChange={(e) => setScore(e.target.value)} className="w-full p-3 rounded-xl border border-gray-200 bg-white font-bold text-sm focus:outline-none focus:border-[#2E7D32]" />
+                  <input type="text" inputMode="numeric" placeholder="화료 점수 직접 입력 (선택사항, 예: 8000)" value={score} onChange={(e) => setScore(e.target.value.replace(/[^0-9]/g, ''))} className="w-full p-3 rounded-xl border border-gray-200 bg-white font-bold text-sm focus:outline-none focus:border-[#2E7D32]" />
                 </section>
               </>
             ) : recordMode === '유국' ? (
