@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
-import { Gamepad2, Plus, List, BarChart2, Trophy, ChevronLeft, Check, Trash2, ShieldAlert, Users, X, Flag, Edit, Lock, Unlock, Search, CalendarPlus, Shield, UserCheck, ShieldClose, UserX, MessageSquare, AlertOctagon, PieChart, BarChart, Bell, ArrowUpDown, Swords } from 'lucide-react';
+import { Gamepad2, Plus, List, BarChart2, Trophy, ChevronLeft, Check, Trash2, ShieldAlert, Users, X, Flag, Edit, Lock, Unlock, Search, CalendarPlus, Shield, UserCheck, ShieldClose, UserX, MessageSquare, AlertOctagon, PieChart, BarChart, Bell, ArrowUpDown, Swords, Info} from 'lucide-react';
 import { db } from './firebase'; 
 import { collection, doc, setDoc, getDoc, updateDoc, deleteDoc, onSnapshot, query, orderBy } from 'firebase/firestore'; 
 
@@ -78,6 +78,7 @@ const getMahjongScore = (han, fu, isDealer, isTsumo, honba = 0, is3Player = fals
 };
 
 function App() {
+  const [activeTooltip, setActiveTooltip] = useState(null);
   const [activeTab, setActiveTab] = useState('전체');
   const [activeNav, setActiveNav] = useState('기록');
   
@@ -1549,6 +1550,7 @@ function App() {
               <ul className="text-sm font-bold text-gray-700 space-y-2 pl-2 list-disc list-inside">
                 <li>라이벌 페이지를 신설하였습니다.</li>
                 <li>개인 통계 페이지에서 화료 및 방총의 상대를 볼 수 있도록 개선하였습니다.</li>
+                <li>개인 통계 페이지에 대국 스타일 스탯을 추가하였습니다.</li>
               </ul>
             </div>
             <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-200 animate-in fade-in slide-in-from-bottom-2">
@@ -1704,9 +1706,11 @@ function App() {
                 });
             });
 
+            const rentaiCount = ranks[0] + ranks[1];
+
             const mStat = {
                 gamesPlayed: playCount, totalUma: tUma, totalUma4: tUma4, totalUma3: tUma3, winCount: wCount, dealInCount: dCount, 
-                yakumanCount, chomboCount, ranks, tobiCount,
+                yakumanCount, chomboCount, ranks, tobiCount, rentaiCount,
                 tobiRate: playCount > 0 ? ((tobiCount / playCount) * 100).toFixed(1) : 0,
                 rentaiRate: playCount > 0 ? (((ranks[0] + ranks[1]) / playCount) * 100).toFixed(1) : 0,
                 winRate: rCount > 0 ? ((wCount / rCount) * 100).toFixed(1) : 0, 
@@ -1718,6 +1722,78 @@ function App() {
                 maxHonba: mHonba, avgDealInScore: dScoreCount > 0 ? Math.floor(dScore / dScoreCount) : 0,
                 yakus, riichiWinCount, damaWinCount, furoWinCount, menzenTsumo, menzenRon, furoTsumo, furoRon, waitTypes
             };
+
+            // ---------------------------------------------------------
+            // 💡 육각형 레이더 차트용 스탯 계산 (All-Time / 중복 변수명 수정)
+            // ---------------------------------------------------------
+            const rtAllGames = games.filter(g => g.status === '종료' && g.players.includes(selectedStatPlayer.name));
+            let rtTotalRounds = 0, rtTotalWins = 0, rtTotalDealIns = 0, rtTotalWinScore = 0;
+            let rtFuroWins = 0, rtRyanmenWins = 0, rtLuckPoints = 0, rtGames4 = 0, rtRentai4 = 0;
+
+            rtAllGames.forEach(g => {
+              const pIdx = g.players.indexOf(selectedStatPlayer.name);
+              
+              // [안정] 4마만 계산 (전체 시즌)
+              if (g.type === '4인') {
+                rtGames4++;
+                const sorted = [...g.finalResults].sort((a,b) => b.score - a.score);
+                const myRank = sorted.findIndex(s => s.score === g.finalResults[pIdx].score) + 1;
+                if (myRank <= 2) rtRentai4++;
+              }
+
+              g.rounds.forEach(r => {
+                rtTotalRounds++; // 참전 라운드
+                if (r.type === '화료' && r.winner === selectedStatPlayer.name) {
+                  rtTotalWins++;
+                  // [화력] 평균 타점 (본장 제외)
+                  const dealerIdx = (r.roundNum - 1) % g.players.length;
+                  const isD = g.players.indexOf(r.winner) === dealerIdx;
+                  const { pureTotal } = getMahjongScore(r.han, r.fu, isD, r.winType === '쯔모', 0, g.type === '3인');
+                  rtTotalWinScore += pureTotal;
+
+                  // [유연성] 비멘젠 화료
+                  if (r.menzen === '비멘젠') rtFuroWins++;
+                  // [조패] 양면 대기 화료
+                  if (r.waitType === '양면') rtRyanmenWins++;
+                  // [행운] 일발, 해저로월, 영상개화, 뒷도라 (하저로어 제외)
+                  if (r.selectedYaku?.includes('리치') || r.selectedYaku?.includes('더블리치')) {
+                    if (r.selectedYaku?.includes('일발')) rtLuckPoints++;
+                  }
+                  if (r.selectedYaku?.includes('해저로월')) rtLuckPoints++;
+                  if (r.selectedYaku?.includes('영상개화')) rtLuckPoints++;
+                  if (r.ura > 0) rtLuckPoints++; 
+                }
+                // [수비] 방총 횟수
+                if (r.type === '화료' && r.winType === '론' && r.loser === selectedStatPlayer.name) rtTotalDealIns++;
+              });
+            });
+
+            // 정규화 함수
+            const rtNorm = (v, min, max) => Math.min(100, Math.max(0, ((v - min) / (max - min)) * 100));
+
+            const scoreFire = rtTotalWins > 0 ? rtNorm(rtTotalWinScore / rtTotalWins, 3000, 10000) : 0;
+            const scoreDef = rtTotalRounds > 0 ? rtNorm(25 - (rtTotalDealIns / rtTotalRounds * 100), 25 - 25, 25 - 10) : 0;
+            const scoreStab = rtGames4 > 0 ? rtNorm(rtRentai4 / rtGames4 * 100, 30, 60) : 0;
+            const scoreFlex = rtTotalWins > 0 ? rtNorm(rtFuroWins / rtTotalWins * 100, 10, 50) : 0;
+            const scoreLuck = rtTotalWins > 0 ? rtNorm(rtLuckPoints / rtTotalWins, 0.1, 0.5) : 0;
+            const scoreEffi = rtTotalWins > 0 ? rtNorm(rtRyanmenWins / rtTotalWins * 100, 25, 65) : 0;
+
+            const rtRadarData = [
+              { label: '화력', score: scoreFire, desc: '평균 타점 기반\n(평균-3000)/7000' },
+              { label: '수비', score: scoreDef, desc: '방총률 역산\n(25-방총률)/15' },
+              { label: '안정', score: scoreStab, desc: '4인 연대율 기반\n(연대율-30)/30' },
+              { label: '유연성', score: scoreFlex, desc: '비멘젠 화료 비중\n(후로율-10)/40' },
+              { label: '행운', score: scoreLuck, desc: '일발/해저/영상/뒷도라 빈도\n(행운지수-0.1)/0.4' },
+              { label: '조패', score: scoreEffi, desc: '양면 대기 화료 비중\n(양면화료율-25)/40' },
+            ];
+
+            const rtCenterX = 100, rtCenterY = 100, rtRadius = 70;
+            const rtGetPt = (s, i) => {
+              const angle = (Math.PI * 2) / 6 * i - (Math.PI / 2);
+              const r = (s / 100) * rtRadius;
+              return `${rtCenterX + r * Math.cos(angle)},${rtCenterY + r * Math.sin(angle)}`;
+            };
+            const rtPolyPts = rtRadarData.map((d, i) => rtGetPt(d.score, i)).join(' ');
 
             // 💡 1. 화료 상세 분석 함수 (시즌/인원 필터 자동 적용)
             const handleWinBreakdown = () => {
@@ -1861,35 +1937,48 @@ function App() {
                     <>
                       <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
                         <h3 className="text-sm font-bold text-gray-800 mb-3 flex items-center gap-1.5"><BarChart size={16}/> 상세 통계</h3>
-                        <div className="grid grid-cols-4 gap-2 text-center text-sm font-medium mb-3">
-                          <div onClick={handleWinBreakdown} className="flex flex-col gap-1 cursor-pointer hover:bg-gray-50 p-1 rounded transition-colors active:scale-95 border border-transparent hover:border-gray-200">
-                            <span className="text-[10px] text-gray-500 font-bold underline decoration-dotted underline-offset-2">화료 (상세)</span>
-                            <span className="font-black text-[#2E7D32]">{mStat.winCount}회 <span className="text-[10px] font-bold text-gray-400">({mStat.winRate}%)</span></span>
+                        
+                        {/* 💡 화료/방총 상세 박스 (비율이 아래로 떨어지게 수정) */}
+                        <div className="grid grid-cols-4 gap-2 text-center font-medium mb-3">
+                          <div onClick={handleWinBreakdown} className="flex flex-col justify-center cursor-pointer hover:bg-gray-50 p-1 rounded transition-colors active:scale-95 border border-transparent hover:border-gray-200">
+                            <span className="text-[10px] text-gray-500 font-bold underline decoration-dotted underline-offset-2 mb-0.5">화료 (상세)</span>
+                            <span className="font-black text-[#2E7D32] text-sm">{mStat.winCount}회 <span className="block text-[10px] font-bold text-gray-400 leading-tight">({mStat.winRate}%)</span></span>
                           </div>
-                          <div onClick={handleDealInBreakdown} className="flex flex-col gap-1 cursor-pointer hover:bg-gray-50 p-1 rounded transition-colors active:scale-95 border border-transparent hover:border-gray-200">
-                            <span className="text-[10px] text-gray-500 font-bold underline decoration-dotted underline-offset-2">방총 (상세)</span>
-                            <span className="font-black text-orange-500">{mStat.dealInCount}회 <span className="text-[10px] font-bold text-gray-400">({mStat.dealInRate}%)</span></span>
+                          <div onClick={handleDealInBreakdown} className="flex flex-col justify-center cursor-pointer hover:bg-gray-50 p-1 rounded transition-colors active:scale-95 border border-transparent hover:border-gray-200">
+                            <span className="text-[10px] text-gray-500 font-bold underline decoration-dotted underline-offset-2 mb-0.5">방총 (상세)</span>
+                            <span className="font-black text-orange-500 text-sm">{mStat.dealInCount}회 <span className="block text-[10px] font-bold text-gray-400 leading-tight">({mStat.dealInRate}%)</span></span>
                           </div>
-                          <div className="flex flex-col gap-1"><span className="text-[10px] text-gray-500 font-bold">역만수</span><span className="font-black text-red-600">{mStat.yakumanCount}회</span></div>
-                          <div className="flex flex-col gap-1"><span className="text-[10px] text-gray-500 font-bold">쵼보수</span><span className="font-black text-purple-600">{mStat.chomboCount}회</span></div>
+                          <div className="flex flex-col justify-center p-1"><span className="text-[10px] text-gray-500 font-bold mb-0.5">역만수</span><span className="font-black text-red-600 text-sm">{mStat.yakumanCount}회</span></div>
+                          <div className="flex flex-col justify-center p-1"><span className="text-[10px] text-gray-500 font-bold mb-0.5">쵼보수</span><span className="font-black text-purple-600 text-sm">{mStat.chomboCount}회</span></div>
                         </div>
 
-                        <div className={`grid ${playerStatTab === '3인' ? 'grid-cols-3' : 'grid-cols-4'} gap-2 text-center text-sm font-medium mb-3 bg-gray-50 p-2 rounded-lg`}>
+                        {/* 💡 등수 박스 (비율 아래로 스택) */}
+                        <div className={`grid ${playerStatTab === '3인' ? 'grid-cols-3' : 'grid-cols-4'} gap-2 text-center font-medium mb-3 bg-gray-50 p-2 rounded-lg`}>
                           {[1, 2, 3, 4].map(rank => {
                             if (playerStatTab === '3인' && rank === 4) return null;
                             const count = mStat.ranks[rank-1];
                             const pct = mStat.gamesPlayed > 0 ? ((count / mStat.gamesPlayed) * 100).toFixed(0) : 0;
                             return (
-                              <div key={rank} className="flex flex-col gap-0.5"><span className="text-[10px] font-bold text-gray-600">{rank}등수</span><span className="font-black text-gray-800">{count}회</span><span className="text-[9px] text-gray-400">({pct}%)</span></div>
+                              <div key={rank} className="flex flex-col justify-center">
+                                <span className="text-[10px] font-bold text-gray-600 mb-0.5">{rank}등수</span>
+                                <span className="font-black text-gray-800 text-sm">{count}회 <span className="block text-[9px] text-gray-400 leading-tight">({pct}%)</span></span>
+                              </div>
                             )
                           })}
                         </div>
 
-                        <div className={`grid ${playerStatTab === '3인' ? 'grid-cols-1' : 'grid-cols-2'} gap-2 text-center text-sm font-medium`}>
+                        {/* 💡 연대율/토비 박스 (우마 기준 횟수 + 비율 스택) */}
+                        <div className={`grid ${playerStatTab === '3인' ? 'grid-cols-1' : 'grid-cols-2'} gap-2 text-center font-medium`}>
                           {playerStatTab !== '3인' && (
-                            <div className="flex flex-col gap-1 border border-blue-100 bg-blue-50 py-2 rounded-lg"><span className="text-[10px] text-blue-700 font-bold">연대율</span><span className="font-black text-blue-600 text-base">{mStat.rentaiRate}%</span></div>
+                            <div className="flex flex-col justify-center border border-blue-100 bg-blue-50 py-2 rounded-lg">
+                              <span className="text-[10px] text-blue-700 font-bold mb-0.5">연대율 (1~2등)</span>
+                              <span className="font-black text-blue-600 text-sm">{mStat.rentaiCount}회 <span className="block text-[10px] font-medium text-blue-400 leading-tight">({mStat.rentaiRate}%)</span></span>
+                            </div>
                           )}
-                          <div className="flex flex-col gap-1 border border-slate-200 bg-slate-50 py-2 rounded-lg"><span className="text-[10px] text-slate-600 font-bold">들통율 (토비)</span><span className="font-black text-slate-700 text-base">{mStat.tobiCount}회 <span className="text-xs font-medium">({mStat.tobiRate}%)</span></span></div>
+                          <div className="flex flex-col justify-center border border-slate-200 bg-slate-50 py-2 rounded-lg">
+                            <span className="text-[10px] text-slate-600 font-bold mb-0.5">들통율 (토비)</span>
+                            <span className="font-black text-slate-700 text-sm">{mStat.tobiCount}회 <span className="block text-[10px] font-medium text-slate-400 leading-tight">({mStat.tobiRate}%)</span></span>
+                          </div>
                         </div>
                       </div>
 
@@ -2009,7 +2098,85 @@ function App() {
                       })}
                     </div>
                   </div>
-                </div>
+
+                  {/* --------------------------------------------------------- */}
+                  {/* ⚔️ 육각형 레이더 차트 (All-Time) */}
+                  {/* --------------------------------------------------------- */}
+                   {playerStatTab === '전체' && (
+                    <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 mb-10 flex flex-col items-center">
+                      <h3 className="text-sm font-bold text-gray-800 mb-6 w-full flex items-center gap-1.5">
+                        <BarChart2 size={16} className="text-[#2E7D32]"/> 작사 성향 분석 (All-Time)
+                      </h3>
+                      
+                      {/* 육각형 그래프 SVG */}
+                      <div className="relative">
+                        <svg width="220" height="220" viewBox="0 0 200 200">
+                          {/* 배경 그물망 가이드라인 */}
+                          {[20, 40, 60, 80, 100].map(t => (
+                            <polygon key={t} points={rtRadarData.map((_, i) => rtGetPt(t, i)).join(' ')} fill="none" stroke="#f1f5f9" strokeWidth="1" />
+                          ))}
+                          {/* 중심에서 뻗어나가는 축 선 */}
+                          {rtRadarData.map((_, i) => (
+                            <line key={i} x1={rtCenterX} y1={rtCenterY} x2={rtCenterX + rtRadius * Math.cos((Math.PI * 2)/6*i - Math.PI/2)} y2={rtCenterY + rtRadius * Math.sin((Math.PI * 2)/6*i - Math.PI/2)} stroke="#f1f5f9" strokeWidth="1" />
+                          ))}
+                          {/* 실제 스탯 데이터 영역 */}
+                          <polygon points={rtPolyPts} fill="rgba(46, 125, 50, 0.2)" stroke="#2E7D32" strokeWidth="2.5" strokeLinejoin="round" />
+                          
+                          {/* 외곽 라벨 (화력, 수비 등) */}
+                          {rtRadarData.map((d, i) => {
+                            const angle = (Math.PI * 2) / 6 * i - (Math.PI / 2);
+                            const labelR = rtRadius + 22;
+                            const tx = rtCenterX + labelR * Math.cos(angle);
+                            const ty = rtCenterY + labelR * Math.sin(angle);
+                            return (
+                              <text key={i} x={tx} y={ty} textAnchor="middle" fontSize="11" fontWeight="900" fill="#64748b" dominantBaseline="middle">{d.label}</text>
+                            );
+                          })}
+                        </svg>
+                      </div>
+
+                      {/* 하단 점수 패널 및 클릭 시 나타나는 툴팁 */}
+                      <div className="grid grid-cols-3 gap-3 w-full mt-6 relative">
+                        {rtRadarData.map((d, idx) => (
+                          <div key={d.label} className="relative">
+                            <div 
+                              onClick={() => setActiveTooltip(activeTooltip === idx ? null : idx)}
+                              className={`bg-gray-50 p-2 rounded-xl border transition-all flex flex-col items-center cursor-pointer ${activeTooltip === idx ? 'border-[#2E7D32] bg-green-50 shadow-inner' : 'border-gray-100'}`}
+                            >
+                              <div className="flex items-center gap-1 mb-0.5">
+                                <span className="text-[10px] text-gray-400 font-black">{d.label}</span>
+                                <Info size={10} className={activeTooltip === idx ? 'text-[#2E7D32]' : 'text-gray-300'} />
+                              </div>
+                              <span className={`text-sm font-black ${activeTooltip === idx ? 'text-[#2E7D32]' : 'text-gray-700'}`}>
+                                {Math.round(d.score)}
+                              </span>
+                            </div>
+
+                            {/* 💡 개별 스탯 설명 툴팁 */}
+                            {activeTooltip === idx && (
+                              <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-32 bg-[#1e293b] text-white text-[9px] p-2 rounded-lg shadow-xl z-[110] animate-in fade-in zoom-in duration-200">
+                                <div className="font-black border-b border-gray-600 pb-1 mb-1 text-green-400">{d.label} 스탯 공식</div>
+                                <div className="whitespace-pre-line leading-relaxed opacity-90">{d.desc}</div>
+                                <div className="absolute top-full left-1/2 -translate-x-1/2 border-8 border-transparent border-t-[#1e293b]"></div>
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+
+                      {/* 툴팁 외 영역 클릭 시 닫기용 투명 오버레이 */}
+                      {activeTooltip !== null && (
+                        <div className="fixed inset-0 z-[105]" onClick={() => setActiveTooltip(null)}></div>
+                      )}
+                      
+                      <p className="text-[9px] text-gray-400 mt-6 font-bold text-center">
+                        * 0~100점 척도로 변환된 상대적 지표입니다. (i 클릭 시 공식 확인)
+                      </p>
+                    </div>
+                  )}
+                  {/* 💡 레이더 차트 UI 끝 */}
+
+                </div> {/* --- 상세 모달 스크롤 영역(overflow-y-auto)의 끝 --- */}
               </div>
             );
           })()}
