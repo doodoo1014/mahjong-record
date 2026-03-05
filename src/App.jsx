@@ -431,15 +431,19 @@ function App() {
             winnerStat.waitTypes[round.waitType] = (winnerStat.waitTypes[round.waitType] || 0) + 1;
             round.selectedYaku?.forEach(yaku => { winnerStat.yakus[yaku] = (winnerStat.yakus[yaku] || 0) + 1; });
             
-            if (round.score && Number(round.score) > 0) {
-              winnerStat.totalWinScore += Number(round.score);
+            // 💡 평균 타점용 합산 (콤마 제거 등 안전한 숫자 파싱)
+            const parsedScoreW = parseInt(String(round.score||'0').replace(/[^0-9]/g, ''), 10);
+            if (parsedScoreW > 0) {
+              winnerStat.totalWinScore += parsedScoreW;
               winnerStat.winScoreCount += 1;
             }
           }
           if(round.winType === '론' && round.loser && stats[round.loser]) {
             stats[round.loser].dealInCount += 1;
-            if (round.score && Number(round.score) > 0) {
-              stats[round.loser].totalDealInScore += Number(round.score);
+            // 💡 평균 방총점용 합산 (콤마 제거 등 안전한 숫자 파싱)
+            const parsedScoreD = parseInt(String(round.score||'0').replace(/[^0-9]/g, ''), 10);
+            if (parsedScoreD > 0) {
+              stats[round.loser].totalDealInScore += parsedScoreD;
               stats[round.loser].dealInScoreCount += 1;
             }
           }
@@ -1059,9 +1063,10 @@ function App() {
               (selectedSeason === 'all' || g.seasonId === selectedSeason)
             );
 
+            // 💡 2. 모든 세부 통계 변수 초기화
             let playCount = 0, tScore = 0, tUma = 0, tRank = 0;
             let ranks = [0, 0, 0, 0];
-            let wCount = 0, wScore = 0, dCount = 0, dScore = 0, mHonba = 0;
+            let wCount = 0, wScore = 0, wScoreCount = 0, dCount = 0, dScore = 0, dScoreCount = 0, mHonba = 0;
             let maxScore = -99999, minScore = 99999;
             let tobiCount = 0, yakumanCount = 0, chomboCount = 0;
             let yakus = {};
@@ -1094,7 +1099,7 @@ function App() {
                     if(r.type === '화료' && r.winner === selectedStatPlayer.name) {
                         wCount++;
                         const s = parseInt(String(r.score||'0').replace(/[^0-9]/g, ''), 10);
-                        if(s > 0) wScore += s;
+                        if(s > 0) { wScore += s; wScoreCount++; } // 💡 점수가 있을 때만 wScoreCount 증가
                         if(r.honba > mHonba) mHonba = r.honba;
                         
                         if (r.selectedYaku && r.selectedYaku.some(y => yakuData['역만']?.includes(y) || yakuData['더블역만']?.includes(y))) yakumanCount++;
@@ -1120,7 +1125,7 @@ function App() {
                     if(r.type === '화료' && r.winType === '론' && r.loser === selectedStatPlayer.name) {
                         dCount++;
                         const s = parseInt(String(r.score||'0').replace(/[^0-9]/g, ''), 10);
-                        if(s > 0) dScore += s;
+                        if(s > 0) { dScore += s; dScoreCount++; } // 💡 점수가 있을 때만 dScoreCount 증가
                     }
                 });
             });
@@ -1132,10 +1137,11 @@ function App() {
                 rentaiRate: playCount > 0 ? (((ranks[0] + ranks[1]) / playCount) * 100).toFixed(1) : 0,
                 maxScore, minScore, 
                 avgScore: playCount > 0 ? Math.floor(tScore / playCount) : 0,
-                avgWinScore: wCount > 0 ? Math.floor(wScore / wCount) : 0,
+                avgWinScore: wScoreCount > 0 ? Math.floor(wScore / wScoreCount) : 0, // 💡 무조건 화료 횟수가 아닌, '점수가 입력된 횟수'로 나눔
                 avgRank: playCount > 0 ? (tRank / playCount).toFixed(2) : 0,
                 avgUma: playCount > 0 ? (tUma / playCount).toFixed(1) : 0,
-                maxHonba: mHonba, avgDealInScore: dCount > 0 ? Math.floor(dScore / dCount) : 0,
+                maxHonba: mHonba, 
+                avgDealInScore: dScoreCount > 0 ? Math.floor(dScore / dScoreCount) : 0, // 💡 방총점도 동일
                 yakus, riichiWinCount, damaWinCount, furoWinCount, menzenTsumo, menzenRon, furoTsumo, furoRon, waitTypes
             };
 
