@@ -136,7 +136,9 @@ function App() {
 
   const [selectedGameId, setSelectedGameId] = useState(null); 
   const [isNewGameModalOpen, setIsNewGameModalOpen] = useState(false);
-  const [playerE, setPlayerE] = useState(''); const [playerS, setPlayerS] = useState(''); const [playerW, setPlayerW] = useState(''); const [playerN, setPlayerN] = useState(''); 
+  const [showNewGameMenu, setShowNewGameMenu] = useState(false); // 💡 전체 탭에서 + 버튼 눌렀을 때 메뉴 표시 여부
+  const [newGameType, setNewGameType] = useState('4인'); // 💡 새로 만들 게임이 4인인지 3인인지 저장
+  const [playerE, setPlayerE] = useState(''); const [playerS, setPlayerS] = useState(''); const [playerW, setPlayerW] = useState(''); const [playerN, setPlayerN] = useState('');
   const [isEndGameModalOpen, setIsEndGameModalOpen] = useState(false);
   const [finalScores, setFinalScores] = useState([]);
   const [isRoundModalOpen, setIsRoundModalOpen] = useState(false);
@@ -230,7 +232,7 @@ function App() {
   const toggleAbortive = (type) => { setAbortiveType(prev => prev === type ? null : type); if (abortiveType !== type) setTenpaiPlayers([]); };
 
   const handleCreateNewGame = async () => {
-    const gameType = activeTab === '전체' ? '4인' : activeTab;
+    const gameType = newGameType; // 💡 이제 탭 위치가 아닌 새로 선택한 게임 타입을 따름
     if (gameType === '4인' && (!playerE || !playerS || !playerW || !playerN)) return alert("모든 플레이어 이름을 입력해주세요!");
     if (gameType === '3인' && (!playerE || !playerS || !playerW)) return alert("모든 플레이어 이름을 입력해주세요!");
     
@@ -673,9 +675,26 @@ function App() {
                 );
               })
             )}
-            {canWrite && activeTab !== '전체' && (
-              <div className="fixed bottom-20 right-6 z-20">
-                <button onClick={() => setIsNewGameModalOpen(true)} className="bg-[#2E7D32] text-white p-4 rounded-full shadow-lg hover:bg-green-800 active:scale-95 transition-transform">
+            {canWrite && (
+              <div className="fixed bottom-20 right-6 z-20 flex flex-col items-end">
+                {/* 💡 전체 탭일 때 + 버튼을 누르면 나타나는 서브 메뉴 */}
+                {activeTab === '전체' && showNewGameMenu && (
+                  <div className="flex flex-col gap-2 mb-3 animate-in slide-in-from-bottom-2 fade-in zoom-in duration-200">
+                    <button onClick={() => {setNewGameType('4인'); setIsNewGameModalOpen(true); setShowNewGameMenu(false);}} className="bg-white text-[#2E7D32] font-black text-sm px-5 py-3 rounded-full shadow-lg border border-gray-100 hover:bg-gray-50 active:scale-95 transition-all flex items-center gap-2">
+                      <Users size={16}/> 4인 게임 시작
+                    </button>
+                    <button onClick={() => {setNewGameType('3인'); setIsNewGameModalOpen(true); setShowNewGameMenu(false);}} className="bg-white text-[#2E7D32] font-black text-sm px-5 py-3 rounded-full shadow-lg border border-gray-100 hover:bg-gray-50 active:scale-95 transition-all flex items-center gap-2">
+                      <Users size={16}/> 3인 게임 시작
+                    </button>
+                  </div>
+                )}
+                <button 
+                  onClick={() => {
+                    if (activeTab === '전체') setShowNewGameMenu(!showNewGameMenu); // 전체 탭이면 메뉴 토글
+                    else { setNewGameType(activeTab); setIsNewGameModalOpen(true); } // 다른 탭이면 바로 시작
+                  }} 
+                  className={`bg-[#2E7D32] text-white p-4 rounded-full shadow-lg hover:bg-green-800 active:scale-95 transition-transform ${showNewGameMenu ? 'rotate-45' : ''}`}
+                >
                   <Plus size={28} strokeWidth={3} />
                 </button>
               </div>
@@ -1329,14 +1348,16 @@ function App() {
       {isNewGameModalOpen && (
         <div className="absolute inset-0 bg-black bg-opacity-60 z-50 flex flex-col justify-end animate-in fade-in">
           <div className="bg-[#F5F5DC] w-full h-[80%] rounded-t-3xl shadow-2xl flex flex-col animate-in slide-in-from-bottom">
-            <div className="bg-[#2E7D32] rounded-t-3xl p-4 flex justify-between items-center text-white"><h2 className="text-lg font-bold">{activeTab} 대국 시작</h2><button onClick={() => setIsNewGameModalOpen(false)} className="p-1 hover:bg-green-700 rounded-full"><X size={20} /></button></div>
+            {/* 💡 제목을 activeTab 대신 newGameType으로 변경 */}
+            <div className="bg-[#2E7D32] rounded-t-3xl p-4 flex justify-between items-center text-white"><h2 className="text-lg font-bold">{newGameType} 대국 시작</h2><button onClick={() => setIsNewGameModalOpen(false)} className="p-1 hover:bg-green-700 rounded-full"><X size={20} /></button></div>
             <div className="p-5 flex-1 overflow-y-auto">
               <div className="flex items-center gap-2 mb-4"><Users className="text-[#2E7D32]" /><p className="text-gray-800 font-bold text-sm">초기 좌석을 입력해주세요</p></div>
               <div className="space-y-3">
                 <div className="flex items-center gap-3 bg-white p-2 rounded-xl shadow-sm border border-gray-100"><div className="bg-[#2E7D32] text-white w-8 h-8 rounded-lg flex items-center justify-center font-bold text-sm shadow-inner">동</div><input type="text" value={playerE} onChange={e => setPlayerE(e.target.value)} placeholder="동가 이름" className="flex-1 text-sm font-bold bg-transparent focus:outline-none" /></div>
                 <div className="flex items-center gap-3 bg-white p-2 rounded-xl shadow-sm border border-gray-100"><div className="bg-[#2E7D32] text-white w-8 h-8 rounded-lg flex items-center justify-center font-bold text-sm shadow-inner">남</div><input type="text" value={playerS} onChange={e => setPlayerS(e.target.value)} placeholder="남가 이름" className="flex-1 text-sm font-bold bg-transparent focus:outline-none" /></div>
                 <div className="flex items-center gap-3 bg-white p-2 rounded-xl shadow-sm border border-gray-100"><div className="bg-[#2E7D32] text-white w-8 h-8 rounded-lg flex items-center justify-center font-bold text-sm shadow-inner">서</div><input type="text" value={playerW} onChange={e => setPlayerW(e.target.value)} placeholder="서가 이름" className="flex-1 text-sm font-bold bg-transparent focus:outline-none" /></div>
-                {activeTab === '4인' && (<div className="flex items-center gap-3 bg-white p-2 rounded-xl shadow-sm border border-gray-100"><div className="bg-[#2E7D32] text-white w-8 h-8 rounded-lg flex items-center justify-center font-bold text-sm shadow-inner">북</div><input type="text" value={playerN} onChange={e => setPlayerN(e.target.value)} placeholder="북가 이름" className="flex-1 text-sm font-bold bg-transparent focus:outline-none" /></div>)}
+                {/* 💡 북가 입력칸 표시 조건도 newGameType으로 변경 */}
+                {newGameType === '4인' && (<div className="flex items-center gap-3 bg-white p-2 rounded-xl shadow-sm border border-gray-100"><div className="bg-[#2E7D32] text-white w-8 h-8 rounded-lg flex items-center justify-center font-bold text-sm shadow-inner">북</div><input type="text" value={playerN} onChange={e => setPlayerN(e.target.value)} placeholder="북가 이름" className="flex-1 text-sm font-bold bg-transparent focus:outline-none" /></div>)}
               </div>
               <button onClick={handleCreateNewGame} className="w-full bg-[#2E7D32] text-white font-bold text-sm py-3.5 rounded-xl mt-6 shadow-md hover:bg-green-800 active:scale-[0.98] transition-all">대국 시작하기</button>
             </div>
