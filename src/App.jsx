@@ -173,8 +173,11 @@ function App() {
       else if (yakuData['6판 역']?.includes(y)) calcHan += 6;
       else if (yakuData['역만']?.includes(y)) calcHan += 13; 
       else if (yakuData['더블역만']?.includes(y)) calcHan += 26;
+
+      // 💡 현재 '선택된 역' 중에서 후로 감소 목록에 들어있는 녀석만 -1판을 적용
+      if (furoDecreased.includes(y)) calcHan -= 1;
     });
-    calcHan -= furoDecreased.length;
+    
     calcHan += dora + aka + ura;
     if (activeTab === '3인' || currentGame?.type === '3인') calcHan += pei;
     setHan(calcHan > 0 ? calcHan : 1);
@@ -222,7 +225,11 @@ function App() {
 
   const handleWinTypeChange = (type) => { setWinType(type); if (type === '쯔모') setLoser(null); };
   
-  const toggleYaku = (yaku) => setSelectedYaku(prev => prev.includes(yaku) ? prev.filter(y => y !== yaku) : [...prev, yaku]);
+  // 💡 역을 해제할 때, 후로 감소 배열(furoDecreased)에서도 같이 쫓아냅니다.
+  const toggleYaku = (yaku) => {
+    setSelectedYaku(prev => prev.includes(yaku) ? prev.filter(y => y !== yaku) : [...prev, yaku]);
+    setFuroDecreased(prev => prev.filter(y => y !== yaku));
+  };
   const toggleFuroDecrease = (yaku) => { setFuroDecreased(prev => prev.includes(yaku) ? prev.filter(y => y !== yaku) : [...prev, yaku]); setSelectedYaku(prev => prev.includes(yaku) ? prev : [...prev, yaku]); };
   const handleYakuTouchStart = (yaku) => { if (!targetFuroYaku.includes(yaku)) return; yakuTimerRef.current = setTimeout(() => toggleFuroDecrease(yaku), 500); };
   const handleYakuTouchEnd = () => { if (yakuTimerRef.current) clearTimeout(yakuTimerRef.current); };
