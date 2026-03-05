@@ -14,6 +14,7 @@ const yakuData = {
 const targetFuroYaku = ['일기통관', '삼색동순', '찬타', '준찬타', '혼일색', '청일색'];
 const abortiveDraws = ['구종구패', '사풍연타', '사깡유국', '사가리치'];
 const ADMIN_PIN = '0000';
+const fuList = [20, 25, 30, 40, 50, 60, 70, 80, 90, 100, 110];
 
 function App() {
   const [activeTab, setActiveTab] = useState('전체');
@@ -178,10 +179,10 @@ function App() {
     if (recordMode !== '화료') return;
     let calcHan = 0;
     selectedYaku.forEach(y => {
-      if (yakuData['1판']?.includes(y)) calcHan += 1;
-      else if (yakuData['2판']?.includes(y)) calcHan += 2;
-      else if (yakuData['3판']?.includes(y)) calcHan += 3;
-      else if (yakuData['6판']?.includes(y)) calcHan += 6;
+      if (yakuData['1판 역']?.includes(y)) calcHan += 1;
+      else if (yakuData['2판 역']?.includes(y)) calcHan += 2;
+      else if (yakuData['3판 역']?.includes(y)) calcHan += 3;
+      else if (yakuData['6판 역']?.includes(y)) calcHan += 6;
       else if (yakuData['역만']?.includes(y)) calcHan += 13; 
       else if (yakuData['더블역만']?.includes(y)) calcHan += 26;
     });
@@ -1248,7 +1249,26 @@ function App() {
                 </section>
                 <section className="space-y-3"><h3 className="font-bold text-base text-gray-800 border-b pb-1">도라 / 부수 / 판수 (자동계산)</h3>
                   <div className="grid grid-cols-2 gap-3 bg-white p-3 rounded-xl border border-gray-100"><div className="flex justify-between items-center"><span className="font-bold text-amber-600 text-sm">도라</span><div className="flex items-center gap-2"><button onClick={() => setDora(Math.max(0, dora - 1))} className="w-6 h-6 bg-gray-100 rounded font-bold">-</button><span className="w-4 text-center font-bold">{dora}</span><button onClick={() => setDora(dora + 1)} className="w-6 h-6 bg-gray-100 rounded font-bold">+</button></div></div><div className="flex justify-between items-center"><span className="font-bold text-amber-600 text-sm">적도라</span><div className="flex items-center gap-2"><button onClick={() => setAka(Math.max(0, aka - 1))} className="w-6 h-6 bg-gray-100 rounded font-bold">-</button><span className="w-4 text-center font-bold">{aka}</span><button onClick={() => setAka(aka + 1)} className="w-6 h-6 bg-gray-100 rounded font-bold">+</button></div></div><div className="flex justify-between items-center"><span className="font-bold text-amber-600 text-sm">뒷도라</span><div className="flex items-center gap-2"><button onClick={() => setUra(Math.max(0, ura - 1))} className="w-6 h-6 bg-gray-100 rounded font-bold">-</button><span className="w-4 text-center font-bold">{ura}</span><button onClick={() => setUra(ura + 1)} className="w-6 h-6 bg-gray-100 rounded font-bold">+</button></div></div>{activeTab === '3인' && (<div className="flex justify-between items-center"><span className="font-bold text-amber-600 text-sm">북</span><div className="flex items-center gap-2"><button onClick={() => setPei(Math.max(0, pei - 1))} className="w-6 h-6 bg-gray-100 rounded font-bold">-</button><span className="w-4 text-center font-bold">{pei}</span><button onClick={() => setPei(pei + 1)} className="w-6 h-6 bg-gray-100 rounded font-bold">+</button></div></div>)}</div>
-                  <div className="flex gap-3"><div className="flex-1 flex justify-between p-3 bg-white rounded-xl border border-gray-100 items-center"><span className="font-bold text-[#2E7D32] text-sm">부수</span><div className="flex items-center gap-2"><button onClick={() => setFu(Math.max(20, fu - 10))} className="bg-gray-100 w-8 h-8 rounded font-bold">-</button><span className="font-bold text-lg w-6 text-center">{fu}</span><button onClick={() => setFu(Math.min(110, fu + 10))} className="bg-gray-100 w-8 h-8 rounded font-bold">+</button></div></div><div className="flex-1 flex justify-between p-3 bg-green-50 rounded-xl border border-green-200 items-center relative"><span className="absolute -top-2 left-2 bg-green-200 text-green-800 text-[9px] px-1 rounded font-bold">자동계산</span><span className="font-bold text-[#2E7D32] text-sm">판수</span><div className="flex items-center gap-2"><button onClick={() => setHan(Math.max(1, han - 1))} className="bg-white w-8 h-8 rounded font-bold shadow-sm">-</button><span className="font-bold text-xl w-6 text-center text-[#2E7D32]">{han}</span><button onClick={() => setHan(han + 1)} className="bg-white w-8 h-8 rounded font-bold shadow-sm">+</button></div></div></div>
+                  <div className="flex gap-3">
+                    <div className="flex-1 flex justify-between p-3 bg-white rounded-xl border border-gray-100 items-center">
+                      <span className="font-bold text-[#2E7D32] text-sm">부수</span>
+                      <div className="flex items-center gap-2">
+                        {/* 💡 산술 계산 대신 fuList 배열의 인덱스를 찾아 이전/다음 값을 반환하도록 수정 */}
+                        <button onClick={() => setFu(prev => fuList[Math.max(0, fuList.indexOf(prev) - 1)])} className="bg-gray-100 w-8 h-8 rounded font-bold hover:bg-gray-200">-</button>
+                        <span className="font-bold text-lg w-6 text-center">{fu}</span>
+                        <button onClick={() => setFu(prev => fuList[Math.min(fuList.length - 1, fuList.indexOf(prev) + 1)])} className="bg-gray-100 w-8 h-8 rounded font-bold hover:bg-gray-200">+</button>
+                      </div>
+                    </div>
+                    <div className="flex-1 flex justify-between p-3 bg-green-50 rounded-xl border border-green-200 items-center relative">
+                      <span className="absolute -top-2 left-2 bg-green-200 text-green-800 text-[9px] px-1 rounded font-bold shadow-sm">자동계산</span>
+                      <span className="font-bold text-[#2E7D32] text-sm">판수</span>
+                      <div className="flex items-center gap-2">
+                        <button onClick={() => setHan(Math.max(1, han - 1))} className="bg-white w-8 h-8 rounded font-bold shadow-sm hover:bg-gray-50">-</button>
+                        <span className="font-bold text-xl w-6 text-center text-[#2E7D32]">{han}</span>
+                        <button onClick={() => setHan(han + 1)} className="bg-white w-8 h-8 rounded font-bold shadow-sm hover:bg-gray-50">+</button>
+                      </div>
+                    </div>
+                  </div>
                   <input type="number" inputMode="numeric" placeholder="화료 점수 직접 입력 (선택사항, 예: 8000)" value={score} onChange={(e) => setScore(e.target.value)} className="w-full p-3 rounded-xl border border-gray-200 bg-white font-bold text-sm focus:outline-none focus:border-[#2E7D32]" />
                 </section>
               </>
