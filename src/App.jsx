@@ -72,7 +72,7 @@ function App() {
     const userRef = doc(db, 'users', authName); const userSnap = await getDoc(userRef);
     if (userSnap.exists()) return alert('이미 존재하는 이름입니다. 로그인해주세요.');
     let initialRole = 'player'; let isPending = false; let approved = false;
-    if (authName === '마스터') { initialRole = 'master'; approved = true; alert('최고 관리자(마스터) 계정이 생성되었습니다!'); } 
+    if (authName === 'ywc1014') { initialRole = 'master'; approved = true; alert('최고 관리자(마스터) 계정이 생성되었습니다!'); } 
     else if (authRoleReq === 'admin') { isPending = true; alert('가입 완료! 쓰기 및 관리자 권한은 마스터의 승인이 필요합니다.'); } 
     else { alert('가입 완료! 대국 기록을 추가하려면 마스터의 승인이 필요합니다.'); }
     const newUser = { name: authName, pin: authPin, role: initialRole, pendingAdmin: isPending, isApproved: approved };
@@ -784,7 +784,7 @@ function App() {
                     <div className="p-3 pt-2.5">
                       {record.type === '화료' ? (
                         <>
-                          <div className="flex items-center gap-2 mb-2"><span className={`font-bold text-[11px] ${record.winType === '쯔모' ? 'text-[#2E7D32]' : 'text-orange-500'}`}>{record.winType}</span><span className="font-bold text-sm text-gray-800">{record.winner} {record.winType === '론' && <span className="text-gray-400 text-xs font-medium mx-1">← {record.loser}</span>}</span>{record.score && <span className="ml-auto font-black text-[#2E7D32] text-xs">{Number(record.score).toLocaleString()}점</span>}</div>
+                          <div className="flex items-center gap-2 mb-2"><span className={`font-bold text-[11px] ${record.winType === '쯔모' ? 'text-[#2E7D32]' : 'text-orange-500'}`}>{record.winType}</span><span className="font-bold text-sm text-gray-800">{record.winner} {record.winType === '론' && <span className="text-gray-400 text-xs font-medium mx-1">→ {record.loser}</span>}</span>{record.score && <span className="ml-auto font-black text-[#2E7D32] text-xs">{Number(record.score).toLocaleString()}점</span>}</div>
                           <div className="flex flex-wrap gap-1 mb-1.5"><span className="bg-gray-100 text-gray-600 text-[9px] px-1.5 py-0.5 rounded font-bold">{record.waitType}</span><span className="bg-gray-100 text-gray-600 text-[9px] px-1.5 py-0.5 rounded font-bold">{record.menzen}</span>{record.selectedYaku?.map(yaku => <span key={yaku} className="bg-green-50 text-green-700 text-[9px] px-1.5 py-0.5 rounded font-bold border border-green-100">{yaku} {record.furoDecreased.includes(yaku) && '(-1판)'}</span>)}{(record.dora + record.aka + record.ura + record.pei) > 0 && (<span className="bg-amber-50 text-amber-600 text-[9px] px-1.5 py-0.5 rounded font-bold border border-amber-200">도라 {record.dora + record.aka + record.ura + record.pei}</span>)}</div>
                           <div className="text-[10px] text-gray-400 font-bold mt-1">{record.han}판 {record.fu}부</div>
                         </>
