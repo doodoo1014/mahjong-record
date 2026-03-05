@@ -1779,12 +1779,12 @@ function App() {
             const scoreEffi = rtTotalWins > 0 ? rtNorm(rtRyanmenWins / rtTotalWins * 100, 25, 65) : 0;
 
             const rtRadarData = [
-              { label: '화력', score: scoreFire, desc: '평균 타점 기반\n(평균-3000)/7000' },
-              { label: '수비', score: scoreDef, desc: '방총률 역산\n(25-방총률)/15' },
-              { label: '안정', score: scoreStab, desc: '4인 연대율 기반\n(연대율-30)/30' },
-              { label: '유연성', score: scoreFlex, desc: '비멘젠 화료 비중\n(후로율-10)/40' },
-              { label: '행운', score: scoreLuck, desc: '일발/해저/영상/뒷도라 빈도\n(행운지수-0.1)/0.4' },
-              { label: '조패', score: scoreEffi, desc: '양면 대기 화료 비중\n(양면화료율-25)/40' },
+              { label: '화력', score: scoreFire, desc: '평균 타점 기반\n(평균-3000)/7000\n3,000~10,000' },
+              { label: '수비', score: scoreDef, desc: '방총률 역산\n(25-방총률)/15\n25%~10%' },
+              { label: '안정', score: scoreStab, desc: '4인 연대율 기반\n(연대율-30)/30\n30%~60%' },
+              { label: '유연성', score: scoreFlex, desc: '비멘젠 화료 비중\n(후로화료율-10)/40\n10%~50%' },
+              { label: '행운', score: scoreLuck, desc: '일발/해저/영상/뒷도라 빈도\n(행운지수-0.1)/0.4\n0.1개~0.5개' },
+              { label: '조패', score: scoreEffi, desc: '양면 대기 화료 비중\n(양면화료율-25)/40\n25%~65%' },
             ];
 
             const rtCenterX = 100, rtCenterY = 100, rtRadius = 70;
