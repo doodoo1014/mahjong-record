@@ -11,6 +11,25 @@ const yakuData = {
   '역만': ['천화', '지화', '인화', '스안커', '국사무쌍', '대삼원', '구련보등', '소사희', '자일색', '녹일색', '청노두', '스깡쯔', '대차륜', '대죽림', '대수린', '석상삼년'],
   '더블역만': ['대사희', '스안커 단기', '국사무쌍 13면', '순정구련보등', '홍공작', '대칠성']
 }
+
+const hasYakuman = (game) => {
+  if (!game || !game.rounds || !Array.isArray(game.rounds)) return false;
+  return game.rounds.some(r => {
+    if (r?.type !== '화료') return false;
+    
+    // 1. 판수 체크 (13판 이상)
+    if (Number(r?.han || 0) >= 13) return true;
+    
+    // 2. 역 리스트 체크 (역만/더블역만 포함 여부)
+    const selected = r?.selectedYaku || [];
+    if (!Array.isArray(selected)) return false;
+    
+    return selected.some(y => 
+      (yakuData['역만']?.includes(y)) || (yakuData['더블역만']?.includes(y))
+    );
+  });
+};
+
 const targetFuroYaku = ['일기통관', '삼색동순', '찬타', '준찬타', '혼일색', '청일색'];
 const menzenOnlyYaku = ['리치', '일발', '멘젠쯔모', '핑후', '이페코', '더블리치', '치또이쯔', '량페코', '천화', '지화', '인화', '스안커', '국사무쌍', '구련보등', '대차륜', '대죽림', '대수린', '석상삼년', '스안커 단기', '국사무쌍 13면', '순정구련보등', '대칠성'];
 const abortiveDraws = ['구종구패', '사풍연타', '사깡유국', '사가리치'];
@@ -142,6 +161,7 @@ function App() {
   const handleRemoveUser = async (name) => { if(confirm(`${name} 유저를 완전히 삭제하시겠습니까?`)) await deleteDoc(doc(db, 'users', name)); };
 
   const [searchQuery, setSearchQuery] = useState('');
+  const [gameFilter, setGameFilter] = useState('전체');
   const [selectedSeason, setSelectedSeason] = useState('all'); 
   const [isSeasonModalOpen, setIsSeasonModalOpen] = useState(false);
   
@@ -165,14 +185,32 @@ function App() {
   const handleEditSeasonClick = (season) => { setNewSeasonName(season.name); setNewSeasonStart(season.startDate || ''); setNewSeasonEnd(season.endDate || ''); setEditingSeasonId(season.id); };
   const handleCancelEditSeason = () => { setNewSeasonName(''); setNewSeasonStart(''); setNewSeasonEnd(''); setEditingSeasonId(null); };
 
-  const displayedGames = games.filter(g => {
+  // App 내부 130라인 근처
+  const displayedGames = (games || []).filter(g => {
+    // 1. 탭 필터 (4인/3인)
     if (activeTab !== '전체' && g.type !== activeTab) return false;
+    
+    // 2. 시즌 필터
     if (selectedSeason !== 'all' && g.seasonId !== selectedSeason) return false;
+    
+    // 3. 검색어 필터
     if (searchQuery) {
-      const matchDate = g.date.includes(searchQuery);
-      const matchPlayer = g.players.some(p => p.includes(searchQuery));
+      const matchDate = g.date?.includes(searchQuery);
+      const matchPlayer = g.players?.some(p => p?.includes(searchQuery));
       if (!matchDate && !matchPlayer) return false;
     }
+
+    // 4. 몰아보기 필터 (gameFilter)
+    if (gameFilter === '역만') {
+      return hasYakuman(g); // 이제 상단에 선언되어 있어 에러가 나지 않습니다.
+    } 
+    if (gameFilter === '촌보') {
+      return g.rounds?.some(r => r.type === '촌보') ?? false;
+    } 
+    if (gameFilter === '코멘트') {
+      return g.rounds?.some(r => r.comment && r.comment.trim() !== '') ?? false;
+    }
+    
     return true;
   });
 
@@ -372,30 +410,84 @@ function App() {
     setDora(0); setAka(0); setUra(0); setPei(0); setFu(30); setHan(1); setScore('');
     setSelectedYaku([]); setFuroDecreased([]); setTenpaiPlayers([]); setNagashiMangan([]);
     setAbortiveType(null); setRoundComment(''); setChomboPlayer(null); 
+    setIsRoundModalOpen(true);
+  };
+
+  // 💡 삭제되었던 라운드 수정 함수 복구 및 데이터 보호 로직 추가
+  const handleEditRound = (record) => {
+    setEditingRoundId(record.id);
+    setRecordMode(record.type || '화료'); 
+    setWind(record.wind || '동'); 
+    setRoundNum(record.roundNum || 1); 
+    setHonba(record.honba || 0); 
+    setKyotaku(record.kyotaku || 0);
+    
+    if (record.type === '화료') {
+      setWinType(record.winType || '쯔모'); 
+      setWinner(record.winner ? players.indexOf(record.winner) : null); 
+      setLoser(record.loser ? players.indexOf(record.loser) : null);
+      setWaitType(record.waitType || '양면'); 
+      setMenzen(record.menzen || '멘젠');
+      setDora(record.dora || 0); 
+      setAka(record.aka || 0); 
+      setUra(record.ura || 0); 
+      setPei(record.pei || 0);
+      setFu(record.fu || 30); 
+      setHan(record.han || 1); 
+      setScore(record.score || '');
+      setSelectedYaku(record.selectedYaku || []); 
+      setFuroDecreased(record.furoDecreased || []);
+    } else if (record.type === '유국') {
+      setTenpaiPlayers(record.tenpaiPlayers ? record.tenpaiPlayers.map(p => players.indexOf(p)).filter(i => i !== -1) : []);
+      setNagashiMangan(record.nagashiMangan ? record.nagashiMangan.map(p => players.indexOf(p)).filter(i => i !== -1) : []);
+      setAbortiveType(record.abortiveType || null);
+    } else if (record.type === '촌보') {
+      setChomboPlayer(record.chomboPlayer ? players.indexOf(record.chomboPlayer) : null);
+    }
+    setRoundComment(record.comment || '');
     setIsRoundModalOpen(true);
   };
 
+  // 💡 저장 함수도 안전하게 덮어씌움
   const handleSaveRound = async () => {
     let newRound = { id: editingRoundId || Date.now(), wind, roundNum, honba, kyotaku, type: recordMode, comment: roundComment };
+    
     if (recordMode === '화료') {
-      if (winner === null) return alert("화료자를 선택해주세요!");
-      if (winType === '론' && loser === null) return alert("방총자를 입력하지 않았습니다"); // 💡 경고 메시지 일치
-      newRound = { ...newRound, winType, menzen, waitType, winner: players[winner], loser: loser !== null ? players[loser] : null, selectedYaku, furoDecreased, dora, aka, ura, pei, fu, han, score };
+      if (winner === null || winner === -1) return alert("화료자를 선택해주세요!");
+      if (winType === '론' && (loser === null || loser === -1)) return alert("방총자를 입력하지 않았습니다"); 
+      
+      newRound = { 
+        ...newRound, winType, menzen, waitType, 
+        winner: players[winner], 
+        loser: loser !== null && loser !== -1 ? players[loser] : null, 
+        selectedYaku, furoDecreased, dora, aka, ura, pei, fu, han, score 
+      };
     } else if (recordMode === '유국') {
-      newRound = { ...newRound, tenpaiPlayers: tenpaiPlayers.map(i => players[i]), nagashiMangan: nagashiMangan.map(i => players[i]), abortiveType };
+      newRound = { 
+        ...newRound, 
+        tenpaiPlayers: tenpaiPlayers.map(i => players[i]).filter(Boolean), 
+        nagashiMangan: nagashiMangan.map(i => players[i]).filter(Boolean), 
+        abortiveType 
+      };
     } else if (recordMode === '촌보') {
-      if (chomboPlayer === null) return alert("촌보 발생자를 선택해주세요!");
+      if (chomboPlayer === null || chomboPlayer === -1) return alert("촌보 발생자를 선택해주세요!");
       newRound = { ...newRound, chomboPlayer: players[chomboPlayer] };
     }
     
-    const updatedRounds = editingRoundId 
-      ? currentGame.rounds.map(r => r.id === editingRoundId ? newRound : r)
-      : [newRound, ...currentGame.rounds];
+    try {
+      const updatedRounds = editingRoundId 
+        ? currentGame.rounds.map(r => r.id === editingRoundId ? newRound : r)
+        : [newRound, ...currentGame.rounds];
 
-    await setDoc(doc(db, 'games', selectedGameId.toString()), { ...currentGame, rounds: updatedRounds });
-    
-    setIsRoundModalOpen(false); setEditingRoundId(null);
-    setWinner(null); setLoser(null); setSelectedYaku([]); setFuroDecreased([]); setDora(0); setAka(0); setUra(0); setPei(0); setTenpaiPlayers([]); setNagashiMangan([]); setAbortiveType(null); setRoundComment(''); setScore(''); setChomboPlayer(null);
+      await setDoc(doc(db, 'games', selectedGameId.toString()), { ...currentGame, rounds: updatedRounds });
+      
+      setIsRoundModalOpen(false); 
+      setEditingRoundId(null);
+      setWinner(null); setLoser(null); setSelectedYaku([]); setFuroDecreased([]); setDora(0); setAka(0); setUra(0); setPei(0); setTenpaiPlayers([]); setNagashiMangan([]); setAbortiveType(null); setRoundComment(''); setScore(''); setChomboPlayer(null);
+    } catch (error) {
+      console.error("라운드 저장 실패:", error);
+      alert("데이터베이스 저장 중 문제가 발생했습니다.");
+    }
   };
 
   const handleDeleteRound = async (roundId) => { if(confirm("이 국의 기록을 삭제하시겠습니까?")) await setDoc(doc(db, 'games', selectedGameId.toString()), { ...currentGame, rounds: currentGame.rounds.filter(r => r.id !== roundId) }); };
@@ -429,12 +521,6 @@ function App() {
     setIsEndGameModalOpen(false);
   };
 
-  const hasYakuman = (game) => {
-    if(!game.rounds) return false;
-    return game.rounds.some(r => r.type === '화료' && (r.han >= 13 || r.selectedYaku?.some(y => yakuData['역만']?.includes(y) || yakuData['더블역만']?.includes(y))));
-  };
-
-
   // ==========================================
   // 📊 통계 및 랭킹 데이터 처리 로직
   // ==========================================
@@ -465,7 +551,7 @@ function App() {
         const p = res.player;
         if (!stats[p]) {
           stats[p] = { 
-            name: p, gamesPlayed: 0, totalUma: 0, totalUma4: 0, totalUma3: 0, totalScore: 0, maxScore: -99999, minScore: 99999,
+            name: p, gamesPlayed: 0, gamesPlayed4: 0, gamesPlayed3: 0, totalUma: 0, totalUma4: 0, totalUma3: 0, totalScore: 0, maxScore: -99999, minScore: 99999,
             ranks: [0,0,0,0], tobiCount: 0, roundsPlayed: 0, winCount: 0, dealInCount: 0, 
             tsumoCount: 0, ronCount: 0, riichiWinCount: 0, damaWinCount: 0, furoWinCount: 0,
             totalHan: 0, maxHonba: 0, waitTypes: {}, yakus: {},
@@ -477,8 +563,8 @@ function App() {
         }
         stats[p].gamesPlayed += 1; 
         stats[p].totalUma += res.pt; 
-        if (game.type === '4인') stats[p].totalUma4 += res.pt;
-        if (game.type === '3인') stats[p].totalUma3 += res.pt;
+        if (game.type === '4인') { stats[p].totalUma4 += res.pt; stats[p].gamesPlayed4 += 1; }
+        if (game.type === '3인') { stats[p].totalUma3 += res.pt; stats[p].gamesPlayed3 += 1; }
         stats[p].totalScore += res.score; stats[p].ranks[rank] += 1;
         
         if (res.score > stats[p].maxScore) stats[p].maxScore = res.score;
@@ -568,7 +654,16 @@ function App() {
   };
 
   const statsGames = getFilteredGamesForStats(statsMainTab);
-  const playerStatsList = useMemo(() => generatePlayerStats(statsGames).sort((a,b) => b.winCount - a.winCount), [statsGames]);
+  // 💡 정렬 로직: 4인 우마 -> 4인 안 해본 사람은 맨 뒤로 -> 3인 우마 -> 이름순
+  const playerStatsList = useMemo(() => {
+    return generatePlayerStats(statsGames).sort((a, b) => {
+      if (a.gamesPlayed4 > 0 && b.gamesPlayed4 === 0) return -1;
+      if (a.gamesPlayed4 === 0 && b.gamesPlayed4 > 0) return 1;
+      if (b.totalUma4 !== a.totalUma4) return b.totalUma4 - a.totalUma4;
+      if (b.totalUma3 !== a.totalUma3) return b.totalUma3 - a.totalUma3;
+      return a.name.localeCompare(b.name);
+    });
+  }, [statsGames]);
   // 💡 선택된 플레이어는 단순 이름 참조용 객체로 관리 (어차피 모달에서 데이터 자체 계산됨)
   const selectedStatPlayer = selectedStatPlayerName ? { name: selectedStatPlayerName } : null;
 
@@ -706,10 +801,26 @@ function App() {
       )}
 
       {activeNav === '기록' && selectedGameId === null && (
-        <div className="p-4 pb-0 bg-[#F5F5DC] shrink-0">
+        <div className="px-4 pt-4 pb-0 bg-[#F5F5DC] shrink-0 space-y-3">
           <div className="relative">
             <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><Search size={16} className="text-gray-400" /></div>
             <input type="text" placeholder="플레이어 이름 또는 날짜 검색..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full pl-10 pr-4 py-2.5 bg-white border border-gray-200 rounded-xl text-sm font-medium focus:outline-none focus:border-[#2E7D32] shadow-sm" />
+          </div>
+         {/* 💡 필터 버튼 UI 영역 */}
+          <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
+            {['전체', '역만', '촌보', '코멘트'].map(f => (
+              <button 
+                key={f} 
+                onClick={() => setGameFilter(f)} 
+                className={`px-3 py-1.5 rounded-full text-xs font-bold whitespace-nowrap transition-colors border shadow-sm ${
+                  gameFilter === f 
+                    ? 'bg-[#2E7D32] text-white border-[#2E7D32]' 
+                    : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
+                }`}
+              >
+                {f === '역만' && '🔥 '}{f === '촌보' && '⚠️ '}{f === '코멘트' && '💬 '}{f}
+              </button>
+            ))}
           </div>
         </div>
       )}
@@ -728,16 +839,26 @@ function App() {
             ) : (
               displayedGames.map(game => {
                 const isGameYakuman = hasYakuman(game);
+                const hasChomboGame = game.rounds.some(r => r.type === '촌보');
                 
-                // 💡 역만, 촌보 플레이어 판별 함수
                 const playerYakuman = (p) => game.rounds.some(r => r.type === '화료' && r.winner === p && (r.han >= 13 || r.selectedYaku?.some(y => yakuData['역만']?.includes(y) || yakuData['더블역만']?.includes(y))));
                 const playerChombo = (p) => game.rounds.some(r => r.type === '촌보' && r.chomboPlayer === p);
 
+                // 💡 카드 전체 배경 및 테두리 (조건 2, 3 반영)
+                let cardClass = "bg-white border-gray-100";
+                if (isGameYakuman && hasChomboGame) {
+                  cardClass = "bg-gray-300 border-2 border-red-500 shadow-[0_0_15px_rgba(239,68,68,0.3)]";
+                } else if (isGameYakuman) {
+                  cardClass = "bg-white border-2 border-red-500 shadow-[0_0_15px_rgba(239,68,68,0.3)]";
+                } else if (hasChomboGame) {
+                  cardClass = "bg-gray-300 border border-gray-400";
+                }
+
                 return (
-                  <div key={game.id} onClick={() => setSelectedGameId(game.id)} className={`bg-white p-4 rounded-[20px] shadow-sm relative cursor-pointer hover:shadow-md transition-shadow active:scale-[0.98] ${isGameYakuman ? 'border-2 border-red-500 shadow-[0_0_15px_rgba(239,68,68,0.3)]' : 'border border-gray-100'}`}>
+                  <div key={game.id} onClick={() => setSelectedGameId(game.id)} className={`p-4 rounded-[20px] shadow-sm relative cursor-pointer hover:shadow-md transition-shadow active:scale-[0.98] border ${cardClass}`}>
                     {isGameYakuman && <span className="absolute -top-3 -right-2 bg-gradient-to-r from-red-500 to-yellow-500 text-white text-[10px] font-black px-2 py-1 rounded-full shadow-md animate-pulse">역만 대국🔥</span>}
                     <div className="flex justify-between items-center mb-1">
-                        <span className="text-xs text-gray-400 font-medium">{game.date}</span>
+                        <span className="text-xs font-medium text-gray-400">{game.date}</span>
                         <div className="flex items-center gap-1.5"><span className={`text-[10px] font-bold px-2 py-1 rounded ${game.status === '종료' ? 'text-gray-600 bg-gray-100' : 'text-[#2E7D32] bg-green-50'}`}>{game.rounds.length}국</span><span className={`text-[10px] font-bold px-2 py-1 rounded ${game.status === '종료' ? 'text-gray-500 bg-gray-200' : 'text-[#2E7D32] bg-green-50'}`}>{game.status}</span></div>
                     </div>
                     <div className="flex justify-between items-center mb-3">
@@ -745,38 +866,68 @@ function App() {
                       {canWrite && <button onClick={(e) => handleDeleteGame(e, game.id)} className="text-red-300 hover:text-red-500 p-1"><Trash2 size={16} /></button>}
                     </div>
                     
-                    {/* 💡 무조건 grid-cols-2 유지 (3인 게임도 북 자리가 공란이 되며 ㄱ자 모양 완성) */}
                     <div className="grid gap-2 mt-2 grid-cols-2">
-                      {game.players.map((p, i) => {
-                        const isTobi = game.status === '종료' && game.finalResults && game.finalResults[i].score < 0;
-                        const hasY = playerYakuman(p);
-                        const hasC = playerChombo(p);
-                        
-                        // 💡 조건에 따른 박스 색상/테두리 변경
-                        const boxClasses = hasY ? 'bg-red-50 border-2 border-red-500 shadow-[inset_0_0_8px_rgba(239,68,68,0.2)]' : (isTobi || hasC) ? 'bg-gray-200 border border-gray-300 opacity-80' : 'bg-white border border-gray-100';
+                    {game.players.map((p, i) => {
+                      const isTobi = game.status === '종료' && game.finalResults && game.finalResults[i].score < 0;
+                      const hasY = playerYakuman(p);
+                      const hasC = playerChombo(p);
+                      
+                      // 💡 기본값 설정
+                      let boxBg = 'bg-white';
+                      let boxBorder = 'border border-gray-100';
+                      let windBg = 'bg-[#2E7D32]'; // 기본 초록색
+                      let nameColor = 'text-gray-800';
 
-                        return (
-                          <div key={i} className={`flex items-center justify-between p-2 rounded-xl shadow-sm ${boxClasses}`}>
-                            <div className="flex items-center gap-1.5 overflow-hidden">
-                              <div className={`${hasY ? 'bg-red-600' : (isTobi || hasC) ? 'bg-gray-500' : 'bg-[#2E7D32]'} text-white w-6 h-6 min-w-[24px] rounded flex items-center justify-center font-bold text-xs shadow-inner`}>
-                                {['동','남','서','북'][i]}
-                              </div>
-                              <span className={`text-sm font-bold truncate ${hasY ? 'text-red-800' : 'text-gray-800'}`}>{p}</span>
+                      // 2. 역만과 촌보를 동시에 한 경우
+                      if (hasY && hasC) {
+                        boxBg = 'bg-white';
+                        boxBorder = 'border-2 border-gray-600'; 
+                        windBg = 'bg-red-600'; 
+                        nameColor = 'text-gray-800';
+                      }
+                      // 3. 촌보만 한 경우
+                      else if (hasC) {
+                        boxBg = 'bg-white';
+                        boxBorder = 'border-2 border-gray-600'; // 굵은 파란색 테두리
+                        windBg = 'bg-gray-600'; // 바람 파란색
+                        nameColor = 'text-gray-800';
+                      }
+                      // 4. 역만만 한 경우
+                      else if (hasY) {
+                        boxBg = 'bg-white';
+                        boxBorder = 'border-2 border-red-500'; // 굵은 빨간색 테두리
+                        windBg = 'bg-red-600'; // 바람 빨간색
+                        nameColor = 'text-gray-800';
+                      }
+
+                      // 1. 토비(점수 음수)가 나면 최우선으로 회색 처리
+                      if (isTobi) {
+                        boxBg = 'bg-gray-100'; // 배경은 흰색 유지
+                        nameColor = 'text-gray-400'; // 이름 회색
+                      } 
+
+                      return (
+                        <div key={i} className={`flex items-center justify-between p-2 rounded-xl shadow-sm ${boxBg} ${boxBorder}`}>
+                          <div className="flex items-center gap-1.5 overflow-hidden">
+                            <div className={`${windBg} text-white w-6 h-6 min-w-[24px] rounded flex items-center justify-center font-bold text-xs shadow-inner transition-colors`}>
+                              {['동','남','서','북'][i]}
                             </div>
-                            {game.status === '종료' && game.finalResults && (
-                              <div className="flex flex-col items-end pr-1">
-                                <span className={`text-sm font-black ${game.finalResults[i].pt > 0 ? 'text-[#2E7D32]' : game.finalResults[i].pt < 0 ? 'text-red-500' : 'text-gray-500'}`}>
-                                  {game.finalResults[i].pt > 0 ? '+' : ''}{game.finalResults[i].pt}
-                                </span>
-                                <span className="text-[11px] font-bold text-gray-500 mt-0.5">
-                                  {Number(game.finalResults[i].score).toLocaleString()}
-                                </span>
-                              </div>
-                            )}
+                            <span className={`text-sm font-bold truncate ${nameColor}`}>{p}</span>
                           </div>
-                        );
-                      })}
-                    </div>
+                          {game.status === '종료' && game.finalResults && (
+                            <div className="flex flex-col items-end pr-1">
+                              <span className={`text-sm font-black ${game.finalResults[i].pt > 0 ? 'text-[#2E7D32]' : game.finalResults[i].pt < 0 ? 'text-red-500' : 'text-gray-400'}`}>
+                                {game.finalResults[i].pt > 0 ? '+' : ''}{game.finalResults[i].pt}
+                              </span>
+                              <span className={`text-[10px] font-bold mt-0.5 ${isTobi ? 'text-gray-300' : 'text-gray-400'}`}>
+                                {Number(game.finalResults[i].score).toLocaleString()}
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
                   </div>
                 );
               })
@@ -851,13 +1002,15 @@ function App() {
                 records.map(record => {
                   const isRoundYakuman = record.type === '화료' && (record.han >= 13 || record.selectedYaku?.some(y => yakuData['역만']?.includes(y) || yakuData['더블역만']?.includes(y)));
                   
-                  // 💡 만관 이상 호칭 판별
-                  let limitName = '';
-                  if (record.han >= 13) limitName = '헤아림 역만';
-                  else if (record.han >= 11) limitName = '삼배만';
-                  else if (record.han >= 8) limitName = '배만';
-                  else if (record.han >= 6) limitName = '하네만';
-                  else if (record.han >= 5) limitName = '만관';
+                  // 💡 만관 이상 호칭 판별 (부수 만관 포함)
+                  let rankText = '';
+                  if (record.han >= 13) rankText = `헤아림 역만 (${record.han}판)`;
+                  else if (record.han >= 11) rankText = `삼배만 (${record.han}판)`;
+                  else if (record.han >= 8) rankText = `배만 (${record.han}판)`;
+                  else if (record.han >= 6) rankText = `하네만 (${record.han}판)`;
+                  else if (record.han >= 5) rankText = `만관 (${record.han}판)`;
+                  else if ((record.han === 4 && record.fu >= 40) || (record.han === 3 && record.fu >= 70)) rankText = `만관 (${record.han}판 ${record.fu}부)`;
+                  else rankText = `${record.han}판 ${record.fu}부`;
 
                   // 💡 화면에 보여줄 점수 자동 계산 (종료된 대국일 때만 계산 및 노출)
                   let displayScore = "";
@@ -869,39 +1022,80 @@ function App() {
                   }
 
                   return (
-                    <div key={record.id} className={`rounded-xl shadow-sm relative overflow-hidden animate-in fade-in slide-in-from-bottom-2 ${isRoundYakuman ? 'border-2 border-red-500 shadow-[0_0_10px_rgba(239,68,68,0.3)]' : record.type === '촌보' ? 'bg-red-50 border border-red-200' : record.type === '유국' ? 'bg-gray-50 border border-gray-300' : 'bg-white border border-gray-100'}`}>
-                      
-                      <div className={`px-3 py-2 border-b flex justify-between items-center ${isRoundYakuman ? 'bg-red-50 border-red-200' : record.type === '촌보' ? 'bg-red-100 border-red-200' : record.type === '유국' ? 'bg-gray-200 border-gray-300' : 'bg-gray-100 border-gray-200'}`}>
-                        <span className={`font-bold text-sm ${record.type === '촌보' || isRoundYakuman ? 'text-red-800' : 'text-gray-700'}`}>
-                          {record.wind}{record.roundNum}국 {record.honba > 0 && `${record.honba}본장`}
-                          {record.type === '유국' && ' (유국)'}
-                          {record.type === '촌보' && ' (촌보)'}
-                          {isRoundYakuman && ' 🔥 역만)'}
-                        </span>
-                        {canWrite && (
-                          <div className="flex items-center gap-2">
-                            <button onClick={() => handleEditRound(record)} className="text-gray-400 hover:text-blue-500 transition-colors"><Edit size={14} /></button>
-                            <button onClick={() => handleDeleteRound(record.id)} className="text-gray-400 hover:text-red-500 transition-colors"><Trash2 size={14} /></button>
-                          </div>
-                        )}
-                      </div>
-
-                      <div className="p-3 pt-2.5">
-                        {record.type === '화료' ? (
-                          <>
-                            <div className="flex items-center gap-2 mb-2"><span className={`font-bold text-[11px] ${record.winType === '쯔모' ? 'text-[#2E7D32]' : 'text-orange-500'}`}>{record.winType}</span><span className="font-bold text-sm text-gray-800">{record.winner} {record.winType === '론' && <span className="text-gray-400 text-xs font-medium mx-1">→ {record.loser}</span>}</span><span className="ml-auto font-black text-[#2E7D32] text-xs">{displayScore}</span></div>
-                            <div className="flex flex-wrap gap-1 mb-1.5"><span className="bg-gray-100 text-gray-600 text-[9px] px-1.5 py-0.5 rounded font-bold">{record.waitType}</span><span className="bg-gray-100 text-gray-600 text-[9px] px-1.5 py-0.5 rounded font-bold">{record.menzen}</span>{record.selectedYaku?.map(yaku => <span key={yaku} className={`text-[9px] px-1.5 py-0.5 rounded font-bold border ${isRoundYakuman ? 'bg-red-100 text-red-700 border-red-200' : 'bg-green-50 text-green-700 border-green-100'}`}>{yaku} {((record.furoDecreased && record.furoDecreased.includes(yaku)) || (record.menzen === '비멘젠' && targetFuroYaku.includes(yaku))) && '(-1판)'}</span>)}{(record.dora + record.aka + record.ura + record.pei) > 0 && (<span className="bg-amber-50 text-amber-600 text-[9px] px-1.5 py-0.5 rounded font-bold border border-amber-200">도라 {record.dora + record.aka + record.ura + record.pei}</span>)}</div>
-                            <div className="text-[10px] text-gray-400 font-bold mt-1">{limitName ? `${limitName} (${record.han}판)` : `${record.han}판 ${record.fu}부`}</div>
-                          </>
-                        ) : record.type === '유국' ? (
-                          <div className="space-y-1.5"><div className="flex items-center gap-1.5"><ShieldAlert size={14} className="text-gray-500" /><span className="font-bold text-gray-800 text-sm">{record.abortiveType ? `도중유국 (${record.abortiveType})` : '황패유국'}</span></div>{!record.abortiveType && (<div className="text-[11px] font-bold text-gray-600 pl-5 space-y-0.5"><p className="text-gray-500">텐파이: <span className="text-gray-800">{record.tenpaiPlayers.length > 0 ? record.tenpaiPlayers.join(', ') : '전원 노텐'}</span></p>{record.nagashiMangan?.length > 0 && (<p className="text-gray-500 mt-1">유국만관: {record.nagashiMangan.map(p => <span key={p} className="bg-red-100 text-red-600 px-1.5 py-0.5 rounded ml-1">{p}</span>)}</p>)}</div>)}</div>
-                        ) : (
-                          <div className="space-y-1"><div className="flex items-center gap-1.5"><AlertOctagon size={14} className="text-red-500" /><span className="font-bold text-red-700 text-sm">{record.chomboPlayer} 촌보</span></div></div>
-                        )}
-                        {record.comment && (<div className="mt-2 pt-2 border-t border-gray-100 border-opacity-50 text-[10px] text-gray-500 font-medium flex gap-1"><MessageSquare size={12} className="mt-0.5" /> {record.comment}</div>)}
-                      </div>
+                  <div key={record.id} className={`rounded-xl shadow-sm relative overflow-hidden animate-in fade-in slide-in-from-bottom-2 ${isRoundYakuman ? 'border-2 border-red-500 bg-white shadow-[0_0_10px_rgba(239,68,68,0.2)]' : record.type === '촌보' ? 'bg-gray-200 border-gray-100]' : record.type === '유국' ? 'bg-gray-50 border border-gray-300' : 'bg-white border border-gray-100'}`}>
+                    
+                    {/* 상단 국 정보 헤더 */}
+                    <div className={`px-3 py-2 border-b flex justify-between items-center ${isRoundYakuman ? 'bg-red-50 border-red-100' : record.type === '촌보' ? 'bg-gray-400 border-gray-500' : record.type === '유국' ? 'bg-gray-200 border-gray-300' : 'bg-gray-100 border-gray-200'}`}>
+                      <span className={`font-bold text-sm ${record.type === '촌보' ? 'text-gray-800' : isRoundYakuman ? 'text-red-800' : 'text-gray-700'}`}>
+                        {record.wind}{record.roundNum}국 {record.honba > 0 && `${record.honba}본장`}
+                        {record.type === '유국' && ' (유국)'}
+                        {record.type === '촌보' && ' (촌보)'}
+                        {isRoundYakuman && ' - 역만 등장'}
+                      </span>
+                      {canWrite && (
+                        <div className="flex items-center gap-2">
+                          <button onClick={() => handleEditRound(record)} className={`transition-colors ${record.type === '촌보' ? 'text-gray-800' : 'text-gray-400 hover:text-gray-500'}`}><Edit size={14} /></button>
+                          <button onClick={() => handleDeleteRound(record.id)} className={`transition-colors ${record.type === '촌보' ? 'text-gray-800' : 'text-gray-400 hover:text-red-500'}`}><Trash2 size={14} /></button>
+                        </div>
+                      )}
                     </div>
-                  );
+
+                    <div className="p-3 pt-2.5">
+                      {/* 💡 핵심: 화료(및 역만) 시 정보 표시 부분 */}
+                      {record.type === '화료' ? (
+                        <>
+                          <div className="flex items-center gap-2 mb-2">
+                            <span className={`font-bold text-[11px] ${record.winType === '쯔모' ? 'text-[#2E7D32]' : 'text-orange-500'}`}>{record.winType}</span>
+                            <span className="font-bold text-sm text-gray-800">
+                              {record.winner} 
+                              {record.winType === '론' && <span className="text-gray-400 text-xs font-medium mx-1">→ {record.loser}</span>}
+                            </span>
+                            <span className="ml-auto font-black text-[#2E7D32] text-xs">{displayScore}</span>
+                          </div>
+                          
+                          <div className="flex flex-wrap gap-1 mb-1.5">
+                            <span className="bg-gray-100 text-gray-600 text-[9px] px-1.5 py-0.5 rounded font-bold">{record.waitType}</span>
+                            <span className="bg-gray-100 text-gray-600 text-[9px] px-1.5 py-0.5 rounded font-bold">{record.menzen}</span>
+                            {record.selectedYaku?.map(yaku => (
+                              <span key={yaku} className={`text-[9px] px-1.5 py-0.5 rounded font-bold border ${isRoundYakuman ? 'bg-red-100 text-red-700 border-red-200' : 'bg-green-50 text-green-700 border-green-100'}`}>
+                                {yaku} {record.menzen === '비멘젠' && targetFuroYaku.includes(yaku) && '(-1판)'}
+                              </span>
+                            ))}
+                            {(record.dora + record.aka + record.ura + record.pei) > 0 && (
+                              <span className="bg-amber-50 text-amber-600 text-[9px] px-1.5 py-0.5 rounded font-bold border border-amber-200">도라 {record.dora + record.aka + record.ura + record.pei}</span>
+                            )}
+                          </div>
+                          <div className="text-[10px] text-gray-400 font-bold mt-1">{rankText}</div>
+                        </>
+                      ) : record.type === '유국' ? (
+                        <div className="space-y-1.5">
+                          <div className="flex items-center gap-1.5"><ShieldAlert size={14} className="text-gray-500" /><span className="font-bold text-gray-800 text-sm">{record.abortiveType ? `도중유국 (${record.abortiveType})` : '황패유국'}</span></div>
+                          {!record.abortiveType && (
+                            <div className="text-[11px] font-bold text-gray-600 pl-5 space-y-0.5">
+                              <p className="text-gray-500">텐파이: <span className="text-gray-800">{record.tenpaiPlayers.length > 0 ? record.tenpaiPlayers.join(', ') : '전원 노텐'}</span></p>
+                              {record.nagashiMangan?.length > 0 && (
+                                <p className="text-gray-500 mt-1">유국만관: {record.nagashiMangan.map(p => <span key={p} className="bg-red-100 text-red-600 px-1.5 py-0.5 rounded ml-1">{p}</span>)}</p>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-1.5">
+                            <AlertOctagon size={14} className="text-gray-800" />
+                            <span className="font-bold text-gray-800 text-sm">{record.chomboPlayer} 촌보</span>
+                          </div>
+                        </div>
+                      )}
+                      
+                      {record.comment && (
+                        <div className={`mt-2 pt-2 border-t text-[10px] font-medium flex gap-1 ${record.type === '촌보' ? 'border-gray-800 border-opacity-20 text-gray-800' : 'border-gray-100 border-opacity-50 text-gray-500'}`}>
+                          <MessageSquare size={12} className="mt-0.5" /> {record.comment}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
                 })
               )}
             </div>
