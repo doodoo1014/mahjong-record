@@ -164,7 +164,7 @@ function App() {
   const [fu, setFu] = useState(30); const [han, setHan] = useState(1); const [score, setScore] = useState('');
   const [selectedYaku, setSelectedYaku] = useState([]); const [furoDecreased, setFuroDecreased] = useState([]); 
   const [tenpaiPlayers, setTenpaiPlayers] = useState([]); const [nagashiMangan, setNagashiMangan] = useState([]); const [abortiveType, setAbortiveType] = useState(null); 
-  const [roundComment, setRoundComment] = useState(''); const [chomboPlayer, setChomboPlayer] = useState(null); const [chomboType, setChomboType] = useState('만관 지불');
+  const [roundComment, setRoundComment] = useState(''); const [chomboPlayer, setChomboPlayer] = useState(null); 
   const [editingRoundId, setEditingRoundId] = useState(null); // 💡 수정 모드 식별용 상태
 
   const currentGame = games.find(g => g.id === selectedGameId);
@@ -194,12 +194,49 @@ function App() {
   }, [selectedYaku, furoDecreased, dora, aka, ura, pei, activeTab, currentGame, recordMode]);
 
   const playerTimerRef = useRef(null);
-  const handlePlayerTouchStart = (index) => { playerTimerRef.current = setTimeout(() => { if (winType === '론') { setLoser(index); if (winner === index) setWinner(null); } }, 500); };
-  const handlePlayerTouchEnd = () => { if (playerTimerRef.current) clearTimeout(playerTimerRef.current); };
-  const handlePlayerDoubleClick = (index) => { if (winType === '론') { setLoser(index); if (winner === index) setWinner(null); } };
-  const handlePlayerClick = (index) => { setWinner(index); if (loser === index) setLoser(null); };
-  const handleWinTypeChange = (type) => { setWinType(type); if (type === '쯔모') setLoser(null); };
-  const yakuTimerRef = useRef(null);
+  const clickTimeoutRef = useRef(null);
+  const lastClickedIndexRef = useRef(null);
+  const ignoreClickRef = useRef(false);
+
+  const handlePlayerTouchStart = (index) => { 
+    ignoreClickRef.current = false;
+    playerTimerRef.current = setTimeout(() => { 
+      if (winType === '론') { 
+        setLoser(index); 
+        if (winner === index) setWinner(null); 
+        ignoreClickRef.current = true; // 💡 꾹 누르기(롱프레스)가 발동되면 이어지는 클릭은 무시
+      } 
+    }, 500); 
+  };
+  const handlePlayerTouchEnd = () => { 
+    if (playerTimerRef.current) clearTimeout(playerTimerRef.current); 
+  };
+
+  const handlePlayerClick = (index) => {
+    if (ignoreClickRef.current) { ignoreClickRef.current = false; return; }
+
+    if (clickTimeoutRef.current && lastClickedIndexRef.current === index) {
+      // 💡 0.25초 안에 같은 사람을 또 눌렀을 때 (더블 클릭 -> 방총자 지정)
+      clearTimeout(clickTimeoutRef.current);
+      clickTimeoutRef.current = null;
+      lastClickedIndexRef.current = null;
+      if (winType === '론') { 
+        setLoser(index); 
+        if (winner === index) setWinner(null); 
+      }
+    } else {
+      // 💡 첫 번째 클릭일 때 (0.25초 대기 후 화료자 확정)
+      if (clickTimeoutRef.current) clearTimeout(clickTimeoutRef.current);
+      lastClickedIndexRef.current = index;
+      clickTimeoutRef.current = setTimeout(() => {
+        setWinner(index); 
+        if (loser === index) setLoser(null);
+        clickTimeoutRef.current = null;
+        lastClickedIndexRef.current = null;
+      }, 250); // 250ms 대기
+    }
+  };
+  const handleWinTypeChange = (type) => { setWinType(type); if (type === '쯔모') setLoser(null); };const yakuTimerRef = useRef(null);
   const toggleYaku = (yaku) => setSelectedYaku(prev => prev.includes(yaku) ? prev.filter(y => y !== yaku) : [...prev, yaku]);
   const toggleFuroDecrease = (yaku) => { setFuroDecreased(prev => prev.includes(yaku) ? prev.filter(y => y !== yaku) : [...prev, yaku]); setSelectedYaku(prev => prev.includes(yaku) ? prev : [...prev, yaku]); };
   const handleYakuTouchStart = (yaku) => { if (!targetFuroYaku.includes(yaku)) return; yakuTimerRef.current = setTimeout(() => toggleFuroDecrease(yaku), 500); };
@@ -259,7 +296,7 @@ function App() {
     setWinType('쯔모'); setWinner(null); setLoser(null); setWaitType('양면'); setMenzen('멘젠');
     setDora(0); setAka(0); setUra(0); setPei(0); setFu(30); setHan(1); setScore('');
     setSelectedYaku([]); setFuroDecreased([]); setTenpaiPlayers([]); setNagashiMangan([]);
-    setAbortiveType(null); setRoundComment(''); setChomboPlayer(null); setChomboType('만관 지불');
+    setAbortiveType(null); setRoundComment(''); setChomboPlayer(null); 
     setIsRoundModalOpen(true);
   };
 
@@ -279,7 +316,6 @@ function App() {
       setAbortiveType(record.abortiveType);
     } else if (record.type === '촌보') {
       setChomboPlayer(players.indexOf(record.chomboPlayer));
-      setChomboType(record.chomboType);
     }
     setRoundComment(record.comment || '');
     setIsRoundModalOpen(true);
@@ -295,7 +331,7 @@ function App() {
       newRound = { ...newRound, tenpaiPlayers: tenpaiPlayers.map(i => players[i]), nagashiMangan: nagashiMangan.map(i => players[i]), abortiveType };
     } else if (recordMode === '촌보') {
       if (chomboPlayer === null) return alert("촌보 발생자를 선택해주세요!");
-      newRound = { ...newRound, chomboPlayer: players[chomboPlayer], chomboType };
+      newRound = { ...newRound, chomboPlayer: players[chomboPlayer] };
     }
     
     // 수정 모드일 땐 기존 아이디를 찾아 덮어씌우고, 아닐 땐 맨 앞에 추가
@@ -744,7 +780,7 @@ function App() {
                       ) : record.type === '유국' ? (
                         <div className="space-y-1.5"><div className="flex items-center gap-1.5"><ShieldAlert size={14} className="text-gray-500" /><span className="font-bold text-gray-800 text-sm">{record.abortiveType ? `도중유국 (${record.abortiveType})` : '황패유국'}</span></div>{!record.abortiveType && (<div className="text-[11px] font-bold text-gray-600 pl-5 space-y-0.5"><p className="text-gray-500">텐파이: <span className="text-gray-800">{record.tenpaiPlayers.length > 0 ? record.tenpaiPlayers.join(', ') : '전원 노텐'}</span></p>{record.nagashiMangan?.length > 0 && (<p className="text-gray-500 mt-1">유국만관: {record.nagashiMangan.map(p => <span key={p} className="bg-red-100 text-red-600 px-1.5 py-0.5 rounded ml-1">{p}</span>)}</p>)}</div>)}</div>
                       ) : (
-                        <div className="space-y-1"><div className="flex items-center gap-1.5"><AlertOctagon size={14} className="text-red-500" /><span className="font-bold text-red-700 text-sm">{record.chomboPlayer} 촌보</span></div><p className="text-xs font-bold text-red-500 pl-5">처리: {record.chomboType}</p></div>
+                        <div className="space-y-1"><div className="flex items-center gap-1.5"><AlertOctagon size={14} className="text-red-500" /><span className="font-bold text-red-700 text-sm">{record.chomboPlayer} 촌보</span></div></div>
                       )}
                       {record.comment && (<div className="mt-2 pt-2 border-t border-gray-100 border-opacity-50 text-[10px] text-gray-500 font-medium flex gap-1"><MessageSquare size={12} className="mt-0.5" /> {record.comment}</div>)}
                     </div>
@@ -1271,7 +1307,7 @@ function App() {
                   <div className="flex items-center gap-1.5">
                     {/* 💡 국 번호가 변경되면 setHonba(0)으로 본장 동시 초기화 */}
                     <button onClick={() => { setRoundNum(Math.max(1, roundNum - 1)); setHonba(0); }} className="bg-gray-100 w-8 h-8 rounded font-bold hover:bg-gray-200">-</button>
-                    <span className="font-bold text-lg w-4 text-center text-[#2E7D32]">{roundNum}</span>
+                    <span className="font-bold text-lg w-4 text-center text-black">{roundNum}</span>
                     <button onClick={() => { setRoundNum(Math.min(4, roundNum + 1)); setHonba(0); }} className="bg-gray-100 w-8 h-8 rounded font-bold hover:bg-gray-200">+</button>
                   </div>
                 </div>
@@ -1300,7 +1336,7 @@ function App() {
             {recordMode === '화료' ? (
               <>
                 <section className="space-y-3"><h3 className="font-bold text-base text-gray-800 border-b pb-1">화료 형태</h3><div className="flex gap-2"><button onClick={() => handleWinTypeChange('쯔모')} className={`flex-1 py-3 rounded-xl font-bold border-2 ${winType === '쯔모' ? 'border-[#2E7D32] bg-[#2E7D32] text-white' : 'bg-white text-gray-400 border-gray-100'}`}>쯔모</button><button onClick={() => handleWinTypeChange('론')} className={`flex-1 py-3 rounded-xl font-bold border-2 ${winType === '론' ? 'border-[#2E7D32] bg-[#2E7D32] text-white' : 'bg-white text-gray-400 border-gray-100'}`}>론</button></div><div className="flex gap-2"><button onClick={() => setMenzen('멘젠')} className={`flex-1 py-3 rounded-xl font-bold border-2 ${menzen === '멘젠' ? 'border-[#2E7D32] bg-[#2E7D32] text-white' : 'bg-white text-gray-400 border-gray-100'}`}>멘젠</button><button onClick={() => setMenzen('비멘젠')} className={`flex-1 py-3 rounded-xl font-bold border-2 ${menzen === '비멘젠' ? 'border-[#2E7D32] bg-[#2E7D32] text-white' : 'bg-white text-gray-400 border-gray-100'}`}>비멘젠</button></div></section>
-                <section className="space-y-2"><div className="flex justify-between items-end"><h3 className="font-bold text-base text-gray-800">화료자 / 방총자</h3><p className="text-[10px] text-gray-400 font-medium">클릭: 화료 / 더블클릭: 방총</p></div><div className="grid grid-cols-2 gap-2">{players.map((player, index) => (<button key={index} onTouchStart={() => handlePlayerTouchStart(index)} onTouchEnd={handlePlayerTouchEnd} onDoubleClick={() => handlePlayerDoubleClick(index)} onClick={() => handlePlayerClick(index)} className={`relative h-14 rounded-xl font-bold text-base transition-all border-2 select-none ${winner === index ? 'bg-[#2E7D32] border-[#2E7D32] text-white shadow-inner' : loser === index ? 'bg-orange-500 border-orange-500 text-white shadow-inner' : 'bg-white border-gray-200 text-gray-800'}`}>{winner === index && <span className="absolute top-1 left-2 text-[9px] bg-white text-[#2E7D32] px-1 rounded font-black">화료</span>}{loser === index && <span className="absolute top-1 left-2 text-[9px] bg-white text-orange-600 px-1 rounded font-black">방총</span>}{player}</button>))}</div></section>
+                <section className="space-y-2"><div className="flex justify-between items-end"><h3 className="font-bold text-base text-gray-800">화료자 / 방총자</h3><p className="text-[10px] text-gray-400 font-medium">클릭: 화료 / 더블클릭: 방총</p></div><div className="grid grid-cols-2 gap-2">{players.map((player, index) => (<button key={index} onTouchStart={() => handlePlayerTouchStart(index)} onTouchEnd={handlePlayerTouchEnd} onClick={() => handlePlayerClick(index)} className={`relative h-14 rounded-xl font-bold text-base transition-all border-2 select-none ${winner === index ? 'bg-[#2E7D32] border-[#2E7D32] text-white shadow-inner' : loser === index ? 'bg-orange-500 border-orange-500 text-white shadow-inner' : 'bg-white border-gray-200 text-gray-800'}`}>{winner === index && <span className="absolute top-1 left-2 text-[9px] bg-white text-[#2E7D32] px-1 rounded font-black">화료</span>}{loser === index && <span className="absolute top-1 left-2 text-[9px] bg-white text-orange-600 px-1 rounded font-black">방총</span>}{player}</button>))}</div></section>
                 <section className="space-y-2"><h3 className="font-bold text-base text-gray-800">대기 형태</h3><div className="grid grid-cols-3 gap-2">{['양면', '샤보', '간짱', '변짱', '단기', '특수대기'].map(t => <button key={t} onClick={() => setWaitType(t)} className={`p-2.5 rounded-xl text-center text-sm font-bold border-2 ${waitType === t ? 'border-[#2E7D32] bg-[#2E7D32] text-white' : 'bg-white border-gray-100 text-gray-600'}`}>{t}</button>)}</div></section>
                 <section className="space-y-4"><div className="flex justify-between items-end border-b pb-1"><div className="flex items-center gap-2"><h3 className="font-bold text-base text-gray-800">역 선택</h3><span className="text-[10px] text-orange-500 bg-orange-50 px-1.5 py-0.5 rounded border border-orange-200">더블클릭: 후로 감소</span></div><span className="text-xs font-bold text-[#2E7D32]">선택됨: {selectedYaku.length}개</span></div>
                   {Object.entries(yakuData).map(([category, yakus]) => (<div key={category} className="space-y-1.5"><h4 className="font-bold text-[#2E7D32] text-xs">{category}</h4><div className="grid grid-cols-3 gap-1.5">{yakus.map(yaku => { if (activeTab === '3인' && yaku === '삼색동순') return null; const isSelected = selectedYaku.includes(yaku); const isDecreased = furoDecreased.includes(yaku); const canDecrease = targetFuroYaku.includes(yaku); return (<button key={yaku} onClick={() => toggleYaku(yaku)} onTouchStart={() => canDecrease && handleYakuTouchStart(yaku)} onTouchEnd={() => canDecrease && handleYakuTouchEnd()} onDoubleClick={() => canDecrease && handleYakuDoubleClick(yaku)} className={`relative p-2 rounded-lg text-xs font-bold border transition-colors select-none ${isSelected ? 'bg-green-50 border-[#2E7D32] text-[#2E7D32] shadow-sm' : 'bg-white border-gray-200 text-gray-600'}`}>{isSelected && isDecreased && <span className="absolute -top-2 left-1 text-[8px] bg-orange-100 border border-orange-400 text-orange-600 px-1 rounded shadow-sm">후로 감소 (-1)</span>}{yaku}</button>);})}</div></div>))}
