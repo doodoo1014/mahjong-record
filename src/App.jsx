@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
-import { Gamepad2, Plus, List, BarChart2, Trophy, ChevronLeft, Check, Trash2, ShieldAlert, Users, X, Flag, Edit, Lock, Unlock, Search, CalendarPlus, Shield, UserCheck, ShieldClose, UserX, MessageSquare, AlertOctagon, PieChart, BarChart, Bell } from 'lucide-react';
+import { Gamepad2, Plus, List, BarChart2, Trophy, ChevronLeft, Check, Trash2, ShieldAlert, Users, X, Flag, Edit, Lock, Unlock, Search, CalendarPlus, Shield, UserCheck, ShieldClose, UserX, MessageSquare, AlertOctagon, PieChart, BarChart, Bell, ArrowUpDown } from 'lucide-react';
 import { db } from './firebase'; 
 import { collection, doc, setDoc, getDoc, updateDoc, deleteDoc, onSnapshot, query, orderBy } from 'firebase/firestore'; 
 
@@ -12,9 +12,51 @@ const yakuData = {
   '더블역만': ['대사희', '스안커 단기', '국사무쌍 13면', '순정구련보등', '홍공작', '대칠성']
 }
 const targetFuroYaku = ['일기통관', '삼색동순', '찬타', '준찬타', '혼일색', '청일색'];
+const menzenOnlyYaku = ['리치', '일발', '멘젠쯔모', '핑후', '이페코', '더블리치', '치또이쯔', '량페코', '천화', '지화', '인화', '스안커', '국사무쌍', '구련보등', '대차륜', '대죽림', '대수린', '석상삼년', '스안커 단기', '국사무쌍 13면', '순정구련보등', '대칠성'];
 const abortiveDraws = ['구종구패', '사풍연타', '사깡유국', '사가리치'];
 const ADMIN_PIN = '0000';
-const fuList = [20, 25, 30, 40, 50, 60, 70, 80, 90, 100, 110];
+
+const getMahjongScore = (han, fu, isDealer, isTsumo, honba = 0, is3Player = false) => {
+  let base = 0;
+  if (han >= 13) base = 8000;
+  else if (han >= 11) base = 6000;
+  else if (han >= 8) base = 4000;
+  else if (han >= 6) base = 3000;
+  else if (han >= 5) base = 2000;
+  else {
+    base = fu * Math.pow(2, han + 2);
+    if (base > 2000) base = 2000;
+  }
+
+  const hb = honba * 100;
+  let pureTotal = 0;
+  let display = "";
+
+  if (isDealer) {
+    if (isTsumo) {
+      const pay = Math.ceil((base * 2) / 100) * 100;
+      pureTotal = pay * (is3Player ? 2 : 3);
+      display = `${pay + hb} ALL`;
+    } else {
+      const pay = Math.ceil((base * 6) / 100) * 100;
+      pureTotal = pay;
+      display = `${pay + hb * (is3Player ? 2 : 3)}`;
+    }
+  } else {
+    if (isTsumo) {
+      const dPay = Math.ceil((base * 2) / 100) * 100;
+      const ndPay = Math.ceil(base / 100) * 100;
+      pureTotal = dPay + ndPay * (is3Player ? 1 : 2);
+      display = `${ndPay + hb}/${dPay + hb}`;
+    } else {
+      const pay = Math.ceil((base * 4) / 100) * 100;
+      pureTotal = pay;
+      display = `${pay + hb * (is3Player ? 2 : 3)}`;
+    }
+  }
+
+  return { pureTotal, display };
+};
 
 function App() {
   const [activeTab, setActiveTab] = useState('전체');
@@ -134,11 +176,18 @@ function App() {
     return true;
   });
 
+  const getTodayStr = () => {
+    const d = new Date();
+    return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+  };
+
   const [selectedGameId, setSelectedGameId] = useState(null); 
   const [isNewGameModalOpen, setIsNewGameModalOpen] = useState(false);
-  const [showNewGameMenu, setShowNewGameMenu] = useState(false); // 💡 전체 탭에서 + 버튼 눌렀을 때 메뉴 표시 여부
-  const [newGameType, setNewGameType] = useState('4인'); // 💡 새로 만들 게임이 4인인지 3인인지 저장
+  const [showNewGameMenu, setShowNewGameMenu] = useState(false);
+  const [newGameType, setNewGameType] = useState('4인');
+  const [newGameDate, setNewGameDate] = useState(getTodayStr()); // 💡 대국 일자 상태 추가
   const [playerE, setPlayerE] = useState(''); const [playerS, setPlayerS] = useState(''); const [playerW, setPlayerW] = useState(''); const [playerN, setPlayerN] = useState('');
+
   const [isEndGameModalOpen, setIsEndGameModalOpen] = useState(false);
   const [finalScores, setFinalScores] = useState([]);
   const [isRoundModalOpen, setIsRoundModalOpen] = useState(false);
@@ -163,6 +212,8 @@ function App() {
   const ronCount = winRecords.filter(r => r.winType === '론').length;
   const drawCount = records.filter(r => r.type === '유국').length; 
 
+  // 💡 판수 자동 계산 로직 (비멘젠 시 후로 감소 자동 적용)
+  // 💡 판수 자동 계산 로직 (비멘젠 시 후로 감소 자동 적용)
   useEffect(() => {
     if (recordMode !== '화료') return;
     let calcHan = 0;
@@ -174,82 +225,67 @@ function App() {
       else if (yakuData['역만']?.includes(y)) calcHan += 13; 
       else if (yakuData['더블역만']?.includes(y)) calcHan += 26;
 
-      // 💡 현재 '선택된 역' 중에서 후로 감소 목록에 들어있는 녀석만 -1판을 적용
-      if (furoDecreased.includes(y)) calcHan -= 1;
+      // 비멘젠 상태일 때 후로 감소 역이면 1판 차감
+      if (menzen === '비멘젠' && targetFuroYaku.includes(y)) calcHan -= 1;
     });
-    
     calcHan += dora + aka + ura;
     if (activeTab === '3인' || currentGame?.type === '3인') calcHan += pei;
     setHan(calcHan > 0 ? calcHan : 1);
-  }, [selectedYaku, furoDecreased, dora, aka, ura, pei, activeTab, currentGame, recordMode]);
+  }, [selectedYaku, dora, aka, ura, pei, activeTab, currentGame, recordMode, menzen]);
+
+  // 💡 비멘젠 전환 시, 선택되어 있던 멘젠 전용 역들을 자동으로 해제
+  useEffect(() => {
+    if (menzen === '비멘젠') {
+      setSelectedYaku(prev => prev.filter(y => !menzenOnlyYaku.includes(y)));
+    }
+  }, [menzen]);
 
   const playerTimerRef = useRef(null);
-  const clickTimeoutRef = useRef(null);
-  const lastClickedIndexRef = useRef(null);
-  const ignoreClickRef = useRef(false);
-  const yakuTimerRef = useRef(null);
+  const isPlayerLongPressRef = useRef(false);
 
-  const handlePlayerTouchStart = (index) => { 
-    ignoreClickRef.current = false;
-    playerTimerRef.current = setTimeout(() => { 
-      if (winType === '론') { 
-        setLoser(index); 
-        if (winner === index) setWinner(null); 
-        ignoreClickRef.current = true;
-      } 
-    }, 500); 
-  };
-  const handlePlayerTouchEnd = () => { if (playerTimerRef.current) clearTimeout(playerTimerRef.current); };
-
-  const handlePlayerClick = (index) => {
-    if (ignoreClickRef.current) { ignoreClickRef.current = false; return; }
-    if (clickTimeoutRef.current && lastClickedIndexRef.current === index) {
-      clearTimeout(clickTimeoutRef.current);
-      clickTimeoutRef.current = null;
-      lastClickedIndexRef.current = null;
-      if (winType === '론') { 
-        setLoser(index); 
-        if (winner === index) setWinner(null); 
+  // 💡 화료/방총자 0.3초 롱프레스 로직 (PC 마우스, 모바일 터치 동시 지원)
+  const handlePlayerPressStart = (index) => {
+    isPlayerLongPressRef.current = false;
+    playerTimerRef.current = setTimeout(() => {
+      isPlayerLongPressRef.current = true;
+      if (winType === '론') {
+        setLoser(index);
+        if (winner === index) setWinner(null);
       }
-    } else {
-      if (clickTimeoutRef.current) clearTimeout(clickTimeoutRef.current);
-      lastClickedIndexRef.current = index;
-      clickTimeoutRef.current = setTimeout(() => {
-        setWinner(index); 
-        if (loser === index) setLoser(null);
-        clickTimeoutRef.current = null;
-        lastClickedIndexRef.current = null;
-      }, 250);
-    }
+    }, 300); // 300ms (0.3초)
+  };
+  const handlePlayerPressEnd = () => {
+    if (playerTimerRef.current) clearTimeout(playerTimerRef.current);
+  };
+  const handlePlayerClick = (index) => {
+    if (isPlayerLongPressRef.current) return; // 롱프레스였다면 일반 클릭은 무시
+    setWinner(index);
+    if (loser === index) setLoser(null);
   };
 
   const handleWinTypeChange = (type) => { setWinType(type); if (type === '쯔모') setLoser(null); };
-  
-  // 💡 역을 해제할 때, 후로 감소 배열(furoDecreased)에서도 같이 쫓아냅니다.
+
+  // 💡 역 선택 토글 (비멘젠 상태일 때 멘젠 전용 역은 클릭 무시, 후로 감소는 100% 자동화)
   const toggleYaku = (yaku) => {
+    if (menzen === '비멘젠' && menzenOnlyYaku.includes(yaku)) return;
     setSelectedYaku(prev => prev.includes(yaku) ? prev.filter(y => y !== yaku) : [...prev, yaku]);
-    setFuroDecreased(prev => prev.filter(y => y !== yaku));
   };
-  const toggleFuroDecrease = (yaku) => { setFuroDecreased(prev => prev.includes(yaku) ? prev.filter(y => y !== yaku) : [...prev, yaku]); setSelectedYaku(prev => prev.includes(yaku) ? prev : [...prev, yaku]); };
-  const handleYakuTouchStart = (yaku) => { if (!targetFuroYaku.includes(yaku)) return; yakuTimerRef.current = setTimeout(() => toggleFuroDecrease(yaku), 500); };
-  const handleYakuTouchEnd = () => { if (yakuTimerRef.current) clearTimeout(yakuTimerRef.current); };
-  const handleYakuDoubleClick = (yaku) => { if (!targetFuroYaku.includes(yaku)) return; toggleFuroDecrease(yaku); };
+
   const toggleTenpai = (index) => { setTenpaiPlayers(prev => prev.includes(index) ? prev.filter(i => i !== index) : [...prev, index]); setAbortiveType(null); };
   const toggleNagashi = (index) => setNagashiMangan(prev => prev.includes(index) ? prev.filter(i => i !== index) : [...prev, index]);
-  const toggleAbortive = (type) => { setAbortiveType(prev => prev === type ? null : type); if (abortiveType !== type) setTenpaiPlayers([]); };
+  const toggleAbortive = (type) => { setAbortiveType(prev => prev === type ? null : type); if (abortiveType !== type) setTenpaiPlayers([]); };  
 
   const handleCreateNewGame = async () => {
-    const gameType = newGameType; // 💡 이제 탭 위치가 아닌 새로 선택한 게임 타입을 따름
+    const gameType = newGameType; 
+    if (!newGameDate) return alert("대국 일자를 입력해주세요!");
     if (gameType === '4인' && (!playerE || !playerS || !playerW || !playerN)) return alert("모든 플레이어 이름을 입력해주세요!");
     if (gameType === '3인' && (!playerE || !playerS || !playerW)) return alert("모든 플레이어 이름을 입력해주세요!");
     
-    const today = new Date();
-    const todayStr = today.getFullYear() + '-' + String(today.getMonth() + 1).padStart(2, '0') + '-' + String(today.getDate()).padStart(2, '0');
-    
+    // 💡 직접 선택한 날짜(newGameDate)를 기준으로 시즌 탐색
     let matchedSeasonId = null;
     for (let i = seasons.length - 1; i >= 0; i--) {
       const s = seasons[i];
-      if (s.startDate && s.endDate && todayStr >= s.startDate && todayStr <= s.endDate) {
+      if (s.startDate && s.endDate && newGameDate >= s.startDate && newGameDate <= s.endDate) {
         matchedSeasonId = s.id; break;
       }
     }
@@ -260,10 +296,13 @@ function App() {
       else matchedSeasonId = seasons[seasons.length - 1].id;
     }
 
+    // YYYY-MM-DD 를 YYYY. MM. DD. 로 변환
+    const formattedDate = newGameDate.split('-').join('. ') + '.';
+
     const newGame = { 
       id: Date.now(), 
       seasonId: matchedSeasonId,
-      date: new Date().toLocaleDateString('ko-KR', { year: 'numeric', month: '2-digit', day: '2-digit' }).replace(/\./g, '.').slice(0, -1), 
+      date: formattedDate, 
       type: gameType, 
       players: gameType === '4인' ? [playerE, playerS, playerW, playerN] : [playerE, playerS, playerW], 
       rounds: [], status: '진행중', finalResults: null 
@@ -271,12 +310,64 @@ function App() {
     
     await setDoc(doc(db, 'games', newGame.id.toString()), newGame);
     setIsNewGameModalOpen(false); setSelectedGameId(newGame.id); setActiveNav('기록'); 
-    setPlayerE(''); setPlayerS(''); setPlayerW(''); setPlayerN('');
+    setPlayerE(''); setPlayerS(''); setPlayerW(''); setPlayerN(''); setNewGameDate(getTodayStr()); // 생성 후 오늘로 초기화
   };
 
   const handleOpenNewRound = () => {
     setEditingRoundId(null);
-    setRecordMode('화료'); setWind('동'); setRoundNum(1); setHonba(0); setKyotaku(0);
+    let defaultWind = '동'; let defaultRoundNum = 1; let defaultHonba = 0;
+    
+    // 💡 지능형 라운드(국/본장) 자동 설정 로직
+    if (currentGame && currentGame.rounds && currentGame.rounds.length > 0) {
+      const lastRound = currentGame.rounds[0]; 
+      const maxRound = currentGame.type === '3인' ? 3 : 4;
+      
+      defaultWind = lastRound.wind;
+      defaultRoundNum = lastRound.roundNum;
+      defaultHonba = lastRound.honba;
+
+      // 직전 라운드의 친(Dealer) 알아내기
+      const dealerIndex = (lastRound.roundNum - 1) % currentGame.players.length;
+      const dealerName = currentGame.players[dealerIndex];
+
+      if (lastRound.type === '촌보') {
+        // 1. 촌보: 국풍, 국 번호, 본장 모두 유지
+        defaultWind = lastRound.wind;
+        defaultRoundNum = lastRound.roundNum;
+        defaultHonba = lastRound.honba;
+      } else if (lastRound.type === '화료') {
+        if (lastRound.winner === dealerName) {
+          // 2. 친 화료: 연장 (국 유지, 본장 +1)
+          defaultHonba = lastRound.honba + 1;
+        } else {
+          // 3. 자 화료: 다음 국으로 (본장 0으로 초기화)
+          defaultHonba = 0;
+          defaultRoundNum = lastRound.roundNum + 1;
+        }
+      } else if (lastRound.type === '유국') {
+        if (lastRound.abortiveType) {
+          // 4. 도중유국: 연장 (국 유지, 본장 +1)
+          defaultHonba = lastRound.honba + 1;
+        } else if (lastRound.tenpaiPlayers && lastRound.tenpaiPlayers.includes(dealerName)) {
+          // 5. 황패유국 (친 텐파이): 연장 (국 유지, 본장 +1)
+          defaultHonba = lastRound.honba + 1;
+        } else {
+          // 6. 황패유국 (친 노텐): 다음 국으로 (본장 +1 누적)
+          defaultHonba = lastRound.honba + 1;
+          defaultRoundNum = lastRound.roundNum + 1;
+        }
+      }
+
+      // 💡 국 번호가 최대(4인:4, 3인:3)를 넘어가면 다음 장풍으로 변경
+      if (defaultRoundNum > maxRound) {
+        defaultRoundNum = 1;
+        if (defaultWind === '동') defaultWind = '남';
+        else if (defaultWind === '남') defaultWind = '서';
+        else if (defaultWind === '서') defaultWind = '북';
+      }
+    }
+
+    setRecordMode('화료'); setWind(defaultWind); setRoundNum(defaultRoundNum); setHonba(defaultHonba); setKyotaku(0);
     setWinType('쯔모'); setWinner(null); setLoser(null); setWaitType('양면'); setMenzen('멘젠');
     setDora(0); setAka(0); setUra(0); setPei(0); setFu(30); setHan(1); setScore('');
     setSelectedYaku([]); setFuroDecreased([]); setTenpaiPlayers([]); setNagashiMangan([]);
@@ -284,32 +375,11 @@ function App() {
     setIsRoundModalOpen(true);
   };
 
-  const handleEditRound = (record) => {
-    setEditingRoundId(record.id);
-    setRecordMode(record.type); setWind(record.wind); setRoundNum(record.roundNum); setHonba(record.honba); setKyotaku(record.kyotaku);
-    if (record.type === '화료') {
-      setWinType(record.winType); setWinner(players.indexOf(record.winner)); 
-      setLoser(record.loser ? players.indexOf(record.loser) : null);
-      setWaitType(record.waitType); setMenzen(record.menzen);
-      setDora(record.dora); setAka(record.aka); setUra(record.ura); setPei(record.pei);
-      setFu(record.fu); setHan(record.han); setScore(record.score || '');
-      setSelectedYaku(record.selectedYaku || []); setFuroDecreased(record.furoDecreased || []);
-    } else if (record.type === '유국') {
-      setTenpaiPlayers(record.tenpaiPlayers.map(p => players.indexOf(p)));
-      setNagashiMangan(record.nagashiMangan ? record.nagashiMangan.map(p => players.indexOf(p)) : []);
-      setAbortiveType(record.abortiveType);
-    } else if (record.type === '촌보') {
-      setChomboPlayer(players.indexOf(record.chomboPlayer));
-    }
-    setRoundComment(record.comment || '');
-    setIsRoundModalOpen(true);
-  };
-
   const handleSaveRound = async () => {
     let newRound = { id: editingRoundId || Date.now(), wind, roundNum, honba, kyotaku, type: recordMode, comment: roundComment };
     if (recordMode === '화료') {
       if (winner === null) return alert("화료자를 선택해주세요!");
-      if (winType === '론' && loser === null) return alert("방총자를 선택해주세요!");
+      if (winType === '론' && loser === null) return alert("방총자를 입력하지 않았습니다"); // 💡 경고 메시지 일치
       newRound = { ...newRound, winType, menzen, waitType, winner: players[winner], loser: loser !== null ? players[loser] : null, selectedYaku, furoDecreased, dora, aka, ura, pei, fu, han, score };
     } else if (recordMode === '유국') {
       newRound = { ...newRound, tenpaiPlayers: tenpaiPlayers.map(i => players[i]), nagashiMangan: nagashiMangan.map(i => players[i]), abortiveType };
@@ -370,10 +440,12 @@ function App() {
   // ==========================================
   const [statsMainTab, setStatsMainTab] = useState('전체'); 
   const [statsSubTab, setStatsSubTab] = useState('플레이어'); 
-  const [rankingMainTab, setRankingMainTab] = useState('전체'); 
-  const [rankingSort, setRankingSort] = useState('totalUma');
+  const [statsSearchQuery, setStatsSearchQuery] = useState(''); // 💡 통계 페이지 플레이어 검색
+
+  const [rankingMainTab, setRankingMainTab] = useState('4인'); 
+  const [rankingSortConfig, setRankingSortConfig] = useState({ key: 'totalUma', direction: 'desc' }); // 💡 랭킹 정렬
   const [playerStatTab, setPlayerStatTab] = useState('전체'); 
-  const [selectedStatPlayerName, setSelectedStatPlayerName] = useState(null); // 💡 백지화 에러 방지 (핵심 복구)
+  const [selectedStatPlayerName, setSelectedStatPlayerName] = useState(null); 
   const [breakdownData, setBreakdownData] = useState(null); 
 
   const getFilteredGamesForStats = (typeTab) => {
@@ -393,17 +465,22 @@ function App() {
         const p = res.player;
         if (!stats[p]) {
           stats[p] = { 
-            name: p, gamesPlayed: 0, totalUma: 0, totalScore: 0, maxScore: -99999, minScore: 99999,
+            name: p, gamesPlayed: 0, totalUma: 0, totalUma4: 0, totalUma3: 0, totalScore: 0, maxScore: -99999, minScore: 99999,
             ranks: [0,0,0,0], tobiCount: 0, roundsPlayed: 0, winCount: 0, dealInCount: 0, 
             tsumoCount: 0, ronCount: 0, riichiWinCount: 0, damaWinCount: 0, furoWinCount: 0,
             totalHan: 0, maxHonba: 0, waitTypes: {}, yakus: {},
-            totalWinScore: 0, winScoreCount: 0, 
-            totalDealInScore: 0, dealInScoreCount: 0, 
+            totalWinScore: 0, winScoreCount: 0, maxWinScore: 0, 
+            totalDealInScore: 0, dealInScoreCount: 0, maxDealInScore: 0,
             chomboCount: 0, yakumanCount: 0,
             menzenTsumo: 0, menzenRon: 0, furoTsumo: 0, furoRon: 0
           };
         }
-        stats[p].gamesPlayed += 1; stats[p].totalUma += res.pt; stats[p].totalScore += res.score; stats[p].ranks[rank] += 1;
+        stats[p].gamesPlayed += 1; 
+        stats[p].totalUma += res.pt; 
+        if (game.type === '4인') stats[p].totalUma4 += res.pt;
+        if (game.type === '3인') stats[p].totalUma3 += res.pt;
+        stats[p].totalScore += res.score; stats[p].ranks[rank] += 1;
+        
         if (res.score > stats[p].maxScore) stats[p].maxScore = res.score;
         if (res.score < stats[p].minScore) stats[p].minScore = res.score;
         if (res.score < 0) stats[p].tobiCount += 1;
@@ -413,12 +490,19 @@ function App() {
         game.players.forEach(p => { if (stats[p]) stats[p].roundsPlayed += 1; });
         if(round.type === '화료') {
           const winnerStat = stats[round.winner];
+          
+          // 💡 자동 계산 로직 적용 (본장 0 처리하여 순수 점수 추출)
+          const dealerIndex = (round.roundNum - 1) % game.players.length;
+          const isDealer = game.players.indexOf(round.winner) === dealerIndex;
+          const isTsumo = round.winType === '쯔모';
+          const { pureTotal } = getMahjongScore(round.han, round.fu, isDealer, isTsumo, 0, game.type === '3인');
+
           if(winnerStat) {
             winnerStat.winCount += 1; winnerStat.totalHan += round.han;
             if (round.honba > winnerStat.maxHonba) winnerStat.maxHonba = round.honba;
             
             const isMenzen = round.menzen === '멘젠';
-            if (round.winType === '쯔모') { winnerStat.tsumoCount += 1; isMenzen ? winnerStat.menzenTsumo++ : winnerStat.furoTsumo++; }
+            if (isTsumo) { winnerStat.tsumoCount += 1; isMenzen ? winnerStat.menzenTsumo++ : winnerStat.furoTsumo++; }
             if (round.winType === '론') { winnerStat.ronCount += 1; isMenzen ? winnerStat.menzenRon++ : winnerStat.furoRon++; }
             
             const isRiichi = round.selectedYaku?.includes('리치') || round.selectedYaku?.includes('더블리치');
@@ -431,20 +515,18 @@ function App() {
             winnerStat.waitTypes[round.waitType] = (winnerStat.waitTypes[round.waitType] || 0) + 1;
             round.selectedYaku?.forEach(yaku => { winnerStat.yakus[yaku] = (winnerStat.yakus[yaku] || 0) + 1; });
             
-            // 💡 평균 타점용 합산 (콤마 제거 등 안전한 숫자 파싱)
-            const parsedScoreW = parseInt(String(round.score||'0').replace(/[^0-9]/g, ''), 10);
-            if (parsedScoreW > 0) {
-              winnerStat.totalWinScore += parsedScoreW;
+            if (pureTotal > 0) {
+              winnerStat.totalWinScore += pureTotal;
               winnerStat.winScoreCount += 1;
+              if (pureTotal > winnerStat.maxWinScore) winnerStat.maxWinScore = pureTotal; 
             }
           }
           if(round.winType === '론' && round.loser && stats[round.loser]) {
             stats[round.loser].dealInCount += 1;
-            // 💡 평균 방총점용 합산 (콤마 제거 등 안전한 숫자 파싱)
-            const parsedScoreD = parseInt(String(round.score||'0').replace(/[^0-9]/g, ''), 10);
-            if (parsedScoreD > 0) {
-              stats[round.loser].totalDealInScore += parsedScoreD;
+            if (pureTotal > 0) {
+              stats[round.loser].totalDealInScore += pureTotal;
               stats[round.loser].dealInScoreCount += 1;
+              if (pureTotal > stats[round.loser].maxDealInScore) stats[round.loser].maxDealInScore = pureTotal; 
             }
           }
         } else if (round.type === '촌보') {
@@ -458,6 +540,7 @@ function App() {
       const rentaiCount = s.ranks[0] + s.ranks[1];
       return {
         ...s,
+        // 💡 1. 화료/방총율 기준을 대국수(gamesPlayed)에서 라운드수(roundsPlayed)로 다시 복구
         winRate: s.roundsPlayed > 0 ? ((s.winCount / s.roundsPlayed) * 100).toFixed(1) : 0,
         dealInRate: s.roundsPlayed > 0 ? ((s.dealInCount / s.roundsPlayed) * 100).toFixed(1) : 0,
         avgHan: s.winCount > 0 ? (s.totalHan / s.winCount).toFixed(1) : 0,
@@ -465,7 +548,17 @@ function App() {
         avgUma: s.gamesPlayed > 0 ? (s.totalUma / s.gamesPlayed).toFixed(1) : 0,
         avgScore: s.gamesPlayed > 0 ? Math.floor(s.totalScore / s.gamesPlayed) : 0,
         avgDealInScore: s.dealInScoreCount > 0 ? Math.floor(s.totalDealInScore / s.dealInScoreCount) : 0,
+        
+        // 💡 2. 랭킹에 보여줄 등수와 비율 데이터 명시적 추가
+        rank1Count: s.ranks[0],
         firstRate: s.gamesPlayed > 0 ? ((s.ranks[0] / s.gamesPlayed) * 100).toFixed(1) : 0,
+        rank2Count: s.ranks[1],
+        secondRate: s.gamesPlayed > 0 ? ((s.ranks[1] / s.gamesPlayed) * 100).toFixed(1) : 0,
+        rank3Count: s.ranks[2],
+        thirdRate: s.gamesPlayed > 0 ? ((s.ranks[2] / s.gamesPlayed) * 100).toFixed(1) : 0,
+        rank4Count: s.ranks[3],
+        fourthRate: s.gamesPlayed > 0 ? ((s.ranks[3] / s.gamesPlayed) * 100).toFixed(1) : 0,
+        
         rentaiRate: s.gamesPlayed > 0 ? ((rentaiCount / s.gamesPlayed) * 100).toFixed(1) : 0,
         tobiRate: s.gamesPlayed > 0 ? ((s.tobiCount / s.gamesPlayed) * 100).toFixed(1) : 0,
         avgRank: avgRank,
@@ -476,7 +569,10 @@ function App() {
 
   const statsGames = getFilteredGamesForStats(statsMainTab);
   const playerStatsList = useMemo(() => generatePlayerStats(statsGames).sort((a,b) => b.winCount - a.winCount), [statsGames]);
-  const selectedStatPlayer = playerStatsList.find(p => p.name === selectedStatPlayerName);
+  // 💡 선택된 플레이어는 단순 이름 참조용 객체로 관리 (어차피 모달에서 데이터 자체 계산됨)
+  const selectedStatPlayer = selectedStatPlayerName ? { name: selectedStatPlayerName } : null;
+
+  const filteredPlayerStatsList = playerStatsList.filter(p => p.name.includes(statsSearchQuery));
 
   const openBreakdown = (title, type, key) => {
     const data = playerStatsList.map(p => {
@@ -515,41 +611,41 @@ function App() {
     return w;
   }, [statsGames]);
 
+  const requestRankingSort = (key) => {
+    let direction = 'desc';
+    if (rankingSortConfig.key === key && rankingSortConfig.direction === 'desc') direction = 'asc';
+    setRankingSortConfig({ key, direction });
+  };
+
   const rankingList = useMemo(() => {
     const list = generatePlayerStats(getFilteredGamesForStats(rankingMainTab));
     const sorted = list.sort((a, b) => {
-      let diff = 0;
-      if (rankingSort === 'totalUma') diff = b.totalUma - a.totalUma;
-      else if (rankingSort === 'avgUma') diff = b.avgUma - a.avgUma;
-      else if (rankingSort === 'maxScore') diff = b.maxScore - a.maxScore;
-      else if (rankingSort === 'minScore') diff = a.minScore - b.minScore; 
-      else if (rankingSort === 'gameCount') diff = b.gamesPlayed - a.gamesPlayed;
-      else if (rankingSort === 'firstRate') diff = parseFloat(b.firstRate) - parseFloat(a.firstRate);
-      else if (rankingSort === 'rentaiRate') diff = parseFloat(b.rentaiRate) - parseFloat(a.rentaiRate);
-      else if (rankingSort === 'tobiRate') diff = parseFloat(a.tobiRate) - parseFloat(b.tobiRate); 
+      let valA = a[rankingSortConfig.key];
+      let valB = b[rankingSortConfig.key];
       
-      if (diff === 0) return a.name.localeCompare(b.name);
-      return diff;
+      if (['firstRate', 'secondRate', 'thirdRate', 'fourthRate', 'rentaiRate', 'tobiRate', 'avgRank', 'avgUma', 'totalUma', 'maxScore', 'minScore', 'gamesPlayed', 'avgScore', 'winCount', 'winRate', 'dealInCount', 'dealInRate', 'avgWinScore', 'maxWinScore', 'avgDealInScore', 'maxDealInScore', 'rank1Count', 'rank2Count', 'rank3Count', 'rank4Count'].includes(rankingSortConfig.key)) {
+        valA = parseFloat(valA); valB = parseFloat(valB);
+      }
+      
+      if (valA < valB) return rankingSortConfig.direction === 'asc' ? -1 : 1;
+      if (valA > valB) return rankingSortConfig.direction === 'asc' ? 1 : -1;
+      
+      // 💡 동점 시 무조건 총 우마가 높은 순서로 정렬 (강력한 Tiebreaker)
+      if (b.totalUma !== a.totalUma) return b.totalUma - a.totalUma;
+
+      return a.name.localeCompare(b.name);
     });
 
     let currentRank = 1;
     return sorted.map((player, index, arr) => {
       if (index > 0) {
         const prev = arr[index - 1];
-        let isTie = false;
-        if (rankingSort === 'totalUma') isTie = player.totalUma === prev.totalUma;
-        else if (rankingSort === 'avgUma') isTie = player.avgUma === prev.avgUma;
-        else if (rankingSort === 'maxScore') isTie = player.maxScore === prev.maxScore;
-        else if (rankingSort === 'minScore') isTie = player.minScore === prev.minScore;
-        else if (rankingSort === 'gameCount') isTie = player.gamesPlayed === prev.gamesPlayed;
-        else if (rankingSort === 'firstRate') isTie = player.firstRate === prev.firstRate;
-        else if (rankingSort === 'rentaiRate') isTie = player.rentaiRate === prev.rentaiRate;
-        else if (rankingSort === 'tobiRate') isTie = player.tobiRate === prev.tobiRate;
+        let isTie = player[rankingSortConfig.key] === prev[rankingSortConfig.key];
         if (!isTie) currentRank = index + 1;
       }
       return { ...player, rank: currentRank };
     });
-  }, [games, rankingMainTab, rankingSort, selectedSeason]);
+  }, [games, rankingMainTab, rankingSortConfig, selectedSeason]);
 
 
   if (isLoading) return <div className="h-screen w-full flex items-center justify-center bg-[#F5F5DC] text-[#2E7D32] font-bold">서버 연결 중...</div>;
@@ -627,20 +723,19 @@ function App() {
               <div className="flex-1 flex flex-col items-center justify-center mt-20 text-gray-400 text-center">
                 <Gamepad2 size={64} strokeWidth={1} className="mb-4 text-gray-300" />
                 <h2 className="text-lg font-bold mb-2">검색된 대국 기록이 없습니다</h2>
-                {canWrite ? (
-                  <p className="text-xs">우측 하단 + 버튼으로 새 대국을 만드세요</p>
-                ) : currentUser ? (
-                  <p className="text-xs font-bold text-red-500 bg-red-50 px-3 py-1.5 rounded-lg border border-red-100">쓰기 권한 승인 대기 중입니다 (마스터 문의)</p>
-                ) : (
-                  <p className="text-xs">우측 상단 로그인 후 기록을 추가할 수 있습니다</p>
-                )}
+                {canWrite ? <p className="text-xs">우측 하단 + 버튼으로 새 대국을 만드세요</p> : currentUser ? <p className="text-xs font-bold text-red-500 bg-red-50 px-3 py-1.5 rounded-lg border border-red-100">쓰기 권한 승인 대기 중입니다 (마스터 문의)</p> : <p className="text-xs">우측 상단 로그인 후 기록을 추가할 수 있습니다</p>}
               </div>
             ) : (
               displayedGames.map(game => {
-                const isYakuman = hasYakuman(game);
+                const isGameYakuman = hasYakuman(game);
+                
+                // 💡 역만, 촌보 플레이어 판별 함수
+                const playerYakuman = (p) => game.rounds.some(r => r.type === '화료' && r.winner === p && (r.han >= 13 || r.selectedYaku?.some(y => yakuData['역만']?.includes(y) || yakuData['더블역만']?.includes(y))));
+                const playerChombo = (p) => game.rounds.some(r => r.type === '촌보' && r.chomboPlayer === p);
+
                 return (
-                  <div key={game.id} onClick={() => setSelectedGameId(game.id)} className={`bg-white p-4 rounded-[20px] shadow-sm relative cursor-pointer hover:shadow-md transition-shadow active:scale-[0.98] ${isYakuman ? 'border-2 border-red-500 shadow-[0_0_15px_rgba(239,68,68,0.3)]' : 'border border-gray-100'}`}>
-                    {isYakuman && <span className="absolute -top-3 -right-2 bg-gradient-to-r from-red-500 to-yellow-500 text-white text-[10px] font-black px-2 py-1 rounded-full shadow-md animate-pulse">역만 대국🔥</span>}
+                  <div key={game.id} onClick={() => setSelectedGameId(game.id)} className={`bg-white p-4 rounded-[20px] shadow-sm relative cursor-pointer hover:shadow-md transition-shadow active:scale-[0.98] ${isGameYakuman ? 'border-2 border-red-500 shadow-[0_0_15px_rgba(239,68,68,0.3)]' : 'border border-gray-100'}`}>
+                    {isGameYakuman && <span className="absolute -top-3 -right-2 bg-gradient-to-r from-red-500 to-yellow-500 text-white text-[10px] font-black px-2 py-1 rounded-full shadow-md animate-pulse">역만 대국🔥</span>}
                     <div className="flex justify-between items-center mb-1">
                         <span className="text-xs text-gray-400 font-medium">{game.date}</span>
                         <div className="flex items-center gap-1.5"><span className={`text-[10px] font-bold px-2 py-1 rounded ${game.status === '종료' ? 'text-gray-600 bg-gray-100' : 'text-[#2E7D32] bg-green-50'}`}>{game.rounds.length}국</span><span className={`text-[10px] font-bold px-2 py-1 rounded ${game.status === '종료' ? 'text-gray-500 bg-gray-200' : 'text-[#2E7D32] bg-green-50'}`}>{game.status}</span></div>
@@ -649,46 +744,47 @@ function App() {
                       <h3 className="font-bold text-base text-gray-800 truncate pr-4 tracking-tight">{game.players.join(' · ')}</h3>
                       {canWrite && <button onClick={(e) => handleDeleteGame(e, game.id)} className="text-red-300 hover:text-red-500 p-1"><Trash2 size={16} /></button>}
                     </div>
-                    {game.status === '종료' && game.finalResults ? (
-                      <div className={`grid gap-2 mt-2 ${game.type === '4인' ? 'grid-cols-2' : 'grid-cols-1'}`}>
-                        {game.players.map((p, i) => (
-                          <div key={i} className="flex items-center justify-between bg-white p-2 rounded-xl shadow-sm border border-gray-100">
-                            <div className="flex items-center gap-3 overflow-hidden">
-                              <div className="bg-[#2E7D32] text-white w-8 h-8 min-w-[32px] rounded-lg flex items-center justify-center font-bold text-sm shadow-inner">
+                    
+                    {/* 💡 무조건 grid-cols-2 유지 (3인 게임도 북 자리가 공란이 되며 ㄱ자 모양 완성) */}
+                    <div className="grid gap-2 mt-2 grid-cols-2">
+                      {game.players.map((p, i) => {
+                        const isTobi = game.status === '종료' && game.finalResults && game.finalResults[i].score < 0;
+                        const hasY = playerYakuman(p);
+                        const hasC = playerChombo(p);
+                        
+                        // 💡 조건에 따른 박스 색상/테두리 변경
+                        const boxClasses = hasY ? 'bg-red-50 border-2 border-red-500 shadow-[inset_0_0_8px_rgba(239,68,68,0.2)]' : (isTobi || hasC) ? 'bg-gray-200 border border-gray-300 opacity-80' : 'bg-white border border-gray-100';
+
+                        return (
+                          <div key={i} className={`flex items-center justify-between p-2 rounded-xl shadow-sm ${boxClasses}`}>
+                            <div className="flex items-center gap-1.5 overflow-hidden">
+                              <div className={`${hasY ? 'bg-red-600' : (isTobi || hasC) ? 'bg-gray-500' : 'bg-[#2E7D32]'} text-white w-6 h-6 min-w-[24px] rounded flex items-center justify-center font-bold text-xs shadow-inner`}>
                                 {['동','남','서','북'][i]}
                               </div>
-                              <span className="text-sm font-bold text-gray-800 truncate">{p}</span>
+                              <span className={`text-sm font-bold truncate ${hasY ? 'text-red-800' : 'text-gray-800'}`}>{p}</span>
                             </div>
-                            <div className="flex flex-col items-end pr-1">
-                              <span className={`text-sm font-black ${game.finalResults[i].pt > 0 ? 'text-[#2E7D32]' : game.finalResults[i].pt < 0 ? 'text-red-500' : 'text-gray-500'}`}>
-                                {game.finalResults[i].pt > 0 ? '+' : ''}{game.finalResults[i].pt}
-                              </span>
-                              <span className="text-[11px] font-bold text-gray-400 mt-0.5">
-                                {Number(game.finalResults[i].score).toLocaleString()}
-                              </span>
-                            </div>
+                            {game.status === '종료' && game.finalResults && (
+                              <div className="flex flex-col items-end pr-1">
+                                <span className={`text-sm font-black ${game.finalResults[i].pt > 0 ? 'text-[#2E7D32]' : game.finalResults[i].pt < 0 ? 'text-red-500' : 'text-gray-500'}`}>
+                                  {game.finalResults[i].pt > 0 ? '+' : ''}{game.finalResults[i].pt}
+                                </span>
+                                <span className="text-[11px] font-bold text-gray-500 mt-0.5">
+                                  {Number(game.finalResults[i].score).toLocaleString()}
+                                </span>
+                              </div>
+                            )}
                           </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <div className={`grid gap-2 mt-2 ${game.type === '4인' ? 'grid-cols-2' : 'grid-cols-1'}`}>
-                        {game.players.map((p, i) => (
-                          <div key={i} className="flex items-center gap-3 bg-white p-2 rounded-xl shadow-sm border border-gray-100">
-                            <div className="bg-[#2E7D32] text-white w-8 h-8 min-w-[32px] rounded-lg flex items-center justify-center font-bold text-sm shadow-inner">
-                              {['동','남','서','북'][i]}
-                            </div>
-                            <span className="text-sm font-bold text-gray-700 truncate">{p}</span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
+                        );
+                      })}
+                    </div>
                   </div>
                 );
               })
             )}
+            
+            {/* 💡 전체 탭 플로팅 메뉴형 추가 버튼 */}
             {canWrite && (
               <div className="fixed bottom-20 right-6 z-20 flex flex-col items-end">
-                {/* 💡 전체 탭일 때 + 버튼을 누르면 나타나는 서브 메뉴 */}
                 {activeTab === '전체' && showNewGameMenu && (
                   <div className="flex flex-col gap-2 mb-3 animate-in slide-in-from-bottom-2 fade-in zoom-in duration-200">
                     <button onClick={() => {setNewGameType('4인'); setIsNewGameModalOpen(true); setShowNewGameMenu(false);}} className="bg-white text-[#2E7D32] font-black text-sm px-5 py-3 rounded-full shadow-lg border border-gray-100 hover:bg-gray-50 active:scale-95 transition-all flex items-center gap-2">
@@ -701,8 +797,8 @@ function App() {
                 )}
                 <button 
                   onClick={() => {
-                    if (activeTab === '전체') setShowNewGameMenu(!showNewGameMenu); // 전체 탭이면 메뉴 토글
-                    else { setNewGameType(activeTab); setIsNewGameModalOpen(true); } // 다른 탭이면 바로 시작
+                    if (activeTab === '전체') setShowNewGameMenu(!showNewGameMenu);
+                    else { setNewGameType(activeTab); setIsNewGameModalOpen(true); }
                   }} 
                   className={`bg-[#2E7D32] text-white p-4 rounded-full shadow-lg hover:bg-green-800 active:scale-95 transition-transform ${showNewGameMenu ? 'rotate-45' : ''}`}
                 >
@@ -752,42 +848,66 @@ function App() {
               {records.length === 0 ? (
                 <div className="text-center py-10 text-gray-400 font-bold"><p>우측 하단의 + 버튼을 눌러</p><p>첫 번째 국을 기록해주세요!</p></div>
               ) : (
-                records.map(record => (
-                  <div key={record.id} className={`rounded-xl shadow-sm border relative overflow-hidden animate-in fade-in slide-in-from-bottom-2 ${record.type === '촌보' ? 'bg-red-50 border-red-200' : record.type === '유국' ? 'bg-gray-50 border-gray-300' : 'bg-white border-gray-100'}`}>
-                    
-                    <div className={`px-3 py-2 border-b flex justify-between items-center ${record.type === '촌보' ? 'bg-red-100 border-red-200' : record.type === '유국' ? 'bg-gray-200 border-gray-300' : 'bg-gray-100 border-gray-200'}`}>
-                      <span className={`font-bold text-sm ${record.type === '촌보' ? 'text-red-800' : 'text-gray-700'}`}>
-                        {record.wind}{record.roundNum}국 {record.honba > 0 && `${record.honba}본장`}
-                        {record.type === '유국' && ' (유국)'}
-                        {record.type === '촌보' && ' (촌보)'}
-                      </span>
-                      {canWrite && (
-                        <div className="flex items-center gap-2">
-                          <button onClick={() => handleEditRound(record)} className="text-gray-400 hover:text-blue-500 transition-colors"><Edit size={14} /></button>
-                          <button onClick={() => handleDeleteRound(record.id)} className="text-gray-400 hover:text-red-500 transition-colors"><Trash2 size={14} /></button>
-                        </div>
-                      )}
-                    </div>
+                records.map(record => {
+                  const isRoundYakuman = record.type === '화료' && (record.han >= 13 || record.selectedYaku?.some(y => yakuData['역만']?.includes(y) || yakuData['더블역만']?.includes(y)));
+                  
+                  // 💡 만관 이상 호칭 판별
+                  let limitName = '';
+                  if (record.han >= 13) limitName = '헤아림 역만';
+                  else if (record.han >= 11) limitName = '삼배만';
+                  else if (record.han >= 8) limitName = '배만';
+                  else if (record.han >= 6) limitName = '하네만';
+                  else if (record.han >= 5) limitName = '만관';
 
-                    <div className="p-3 pt-2.5">
-                      {record.type === '화료' ? (
-                        <>
-                          <div className="flex items-center gap-2 mb-2"><span className={`font-bold text-[11px] ${record.winType === '쯔모' ? 'text-[#2E7D32]' : 'text-orange-500'}`}>{record.winType}</span><span className="font-bold text-sm text-gray-800">{record.winner} {record.winType === '론' && <span className="text-gray-400 text-xs font-medium mx-1">→ {record.loser}</span>}</span>{record.score && <span className="ml-auto font-black text-[#2E7D32] text-xs">{Number(record.score).toLocaleString()}점</span>}</div>
-                          <div className="flex flex-wrap gap-1 mb-1.5"><span className="bg-gray-100 text-gray-600 text-[9px] px-1.5 py-0.5 rounded font-bold">{record.waitType}</span><span className="bg-gray-100 text-gray-600 text-[9px] px-1.5 py-0.5 rounded font-bold">{record.menzen}</span>{record.selectedYaku?.map(yaku => <span key={yaku} className="bg-green-50 text-green-700 text-[9px] px-1.5 py-0.5 rounded font-bold border border-green-100">{yaku} {record.furoDecreased.includes(yaku) && '(-1판)'}</span>)}{(record.dora + record.aka + record.ura + record.pei) > 0 && (<span className="bg-amber-50 text-amber-600 text-[9px] px-1.5 py-0.5 rounded font-bold border border-amber-200">도라 {record.dora + record.aka + record.ura + record.pei}</span>)}</div>
-                          <div className="text-[10px] text-gray-400 font-bold mt-1">{record.han}판 {record.fu}부</div>
-                        </>
-                      ) : record.type === '유국' ? (
-                        <div className="space-y-1.5"><div className="flex items-center gap-1.5"><ShieldAlert size={14} className="text-gray-500" /><span className="font-bold text-gray-800 text-sm">{record.abortiveType ? `도중유국 (${record.abortiveType})` : '황패유국'}</span></div>{!record.abortiveType && (<div className="text-[11px] font-bold text-gray-600 pl-5 space-y-0.5"><p className="text-gray-500">텐파이: <span className="text-gray-800">{record.tenpaiPlayers.length > 0 ? record.tenpaiPlayers.join(', ') : '전원 노텐'}</span></p>{record.nagashiMangan?.length > 0 && (<p className="text-gray-500 mt-1">유국만관: {record.nagashiMangan.map(p => <span key={p} className="bg-red-100 text-red-600 px-1.5 py-0.5 rounded ml-1">{p}</span>)}</p>)}</div>)}</div>
-                      ) : (
-                        <div className="space-y-1"><div className="flex items-center gap-1.5"><AlertOctagon size={14} className="text-red-500" /><span className="font-bold text-red-700 text-sm">{record.chomboPlayer} 촌보</span></div></div>
-                      )}
-                      {record.comment && (<div className="mt-2 pt-2 border-t border-gray-100 border-opacity-50 text-[10px] text-gray-500 font-medium flex gap-1"><MessageSquare size={12} className="mt-0.5" /> {record.comment}</div>)}
+                  // 💡 화면에 보여줄 점수 자동 계산 (종료된 대국일 때만 계산 및 노출)
+                  let displayScore = "";
+                  if (record.type === '화료' && currentGame.status === '종료') {
+                    const dealerIndex = (record.roundNum - 1) % currentGame.players.length;
+                    const isDealer = currentGame.players.indexOf(record.winner) === dealerIndex;
+                    const { display } = getMahjongScore(record.han, record.fu, isDealer, record.winType === '쯔모', record.honba, currentGame.type === '3인');
+                    displayScore = display;
+                  }
+
+                  return (
+                    <div key={record.id} className={`rounded-xl shadow-sm relative overflow-hidden animate-in fade-in slide-in-from-bottom-2 ${isRoundYakuman ? 'border-2 border-red-500 shadow-[0_0_10px_rgba(239,68,68,0.3)]' : record.type === '촌보' ? 'bg-red-50 border border-red-200' : record.type === '유국' ? 'bg-gray-50 border border-gray-300' : 'bg-white border border-gray-100'}`}>
+                      
+                      <div className={`px-3 py-2 border-b flex justify-between items-center ${isRoundYakuman ? 'bg-red-50 border-red-200' : record.type === '촌보' ? 'bg-red-100 border-red-200' : record.type === '유국' ? 'bg-gray-200 border-gray-300' : 'bg-gray-100 border-gray-200'}`}>
+                        <span className={`font-bold text-sm ${record.type === '촌보' || isRoundYakuman ? 'text-red-800' : 'text-gray-700'}`}>
+                          {record.wind}{record.roundNum}국 {record.honba > 0 && `${record.honba}본장`}
+                          {record.type === '유국' && ' (유국)'}
+                          {record.type === '촌보' && ' (촌보)'}
+                          {isRoundYakuman && ' 🔥 역만)'}
+                        </span>
+                        {canWrite && (
+                          <div className="flex items-center gap-2">
+                            <button onClick={() => handleEditRound(record)} className="text-gray-400 hover:text-blue-500 transition-colors"><Edit size={14} /></button>
+                            <button onClick={() => handleDeleteRound(record.id)} className="text-gray-400 hover:text-red-500 transition-colors"><Trash2 size={14} /></button>
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="p-3 pt-2.5">
+                        {record.type === '화료' ? (
+                          <>
+                            <div className="flex items-center gap-2 mb-2"><span className={`font-bold text-[11px] ${record.winType === '쯔모' ? 'text-[#2E7D32]' : 'text-orange-500'}`}>{record.winType}</span><span className="font-bold text-sm text-gray-800">{record.winner} {record.winType === '론' && <span className="text-gray-400 text-xs font-medium mx-1">→ {record.loser}</span>}</span><span className="ml-auto font-black text-[#2E7D32] text-xs">{displayScore}</span></div>
+                            <div className="flex flex-wrap gap-1 mb-1.5"><span className="bg-gray-100 text-gray-600 text-[9px] px-1.5 py-0.5 rounded font-bold">{record.waitType}</span><span className="bg-gray-100 text-gray-600 text-[9px] px-1.5 py-0.5 rounded font-bold">{record.menzen}</span>{record.selectedYaku?.map(yaku => <span key={yaku} className={`text-[9px] px-1.5 py-0.5 rounded font-bold border ${isRoundYakuman ? 'bg-red-100 text-red-700 border-red-200' : 'bg-green-50 text-green-700 border-green-100'}`}>{yaku} {((record.furoDecreased && record.furoDecreased.includes(yaku)) || (record.menzen === '비멘젠' && targetFuroYaku.includes(yaku))) && '(-1판)'}</span>)}{(record.dora + record.aka + record.ura + record.pei) > 0 && (<span className="bg-amber-50 text-amber-600 text-[9px] px-1.5 py-0.5 rounded font-bold border border-amber-200">도라 {record.dora + record.aka + record.ura + record.pei}</span>)}</div>
+                            <div className="text-[10px] text-gray-400 font-bold mt-1">{limitName ? `${limitName} (${record.han}판)` : `${record.han}판 ${record.fu}부`}</div>
+                          </>
+                        ) : record.type === '유국' ? (
+                          <div className="space-y-1.5"><div className="flex items-center gap-1.5"><ShieldAlert size={14} className="text-gray-500" /><span className="font-bold text-gray-800 text-sm">{record.abortiveType ? `도중유국 (${record.abortiveType})` : '황패유국'}</span></div>{!record.abortiveType && (<div className="text-[11px] font-bold text-gray-600 pl-5 space-y-0.5"><p className="text-gray-500">텐파이: <span className="text-gray-800">{record.tenpaiPlayers.length > 0 ? record.tenpaiPlayers.join(', ') : '전원 노텐'}</span></p>{record.nagashiMangan?.length > 0 && (<p className="text-gray-500 mt-1">유국만관: {record.nagashiMangan.map(p => <span key={p} className="bg-red-100 text-red-600 px-1.5 py-0.5 rounded ml-1">{p}</span>)}</p>)}</div>)}</div>
+                        ) : (
+                          <div className="space-y-1"><div className="flex items-center gap-1.5"><AlertOctagon size={14} className="text-red-500" /><span className="font-bold text-red-700 text-sm">{record.chomboPlayer} 촌보</span></div></div>
+                        )}
+                        {record.comment && (<div className="mt-2 pt-2 border-t border-gray-100 border-opacity-50 text-[10px] text-gray-500 font-medium flex gap-1"><MessageSquare size={12} className="mt-0.5" /> {record.comment}</div>)}
+                      </div>
                     </div>
-                  </div>
-                ))
+                  );
+                })
               )}
             </div>
-            {currentGame.status === '진행중' && canWrite && (
+
+            {/* 💡 종국한 경기도 canWrite 권한만 있으면 + 버튼이 노출되어 수정할 수 있게 변경됨 */}
+            {canWrite && (
               <div className="fixed bottom-20 right-6 z-20">
                 <button onClick={handleOpenNewRound} className="bg-[#2E7D32] text-white p-4 rounded-full shadow-lg hover:bg-green-800 active:scale-95 transition-transform"><Plus size={28} strokeWidth={3} /></button>
               </div>
@@ -816,20 +936,39 @@ function App() {
             <div className="p-4 pb-10">
               {statsSubTab === '플레이어' && (
                 <div className="space-y-4">
-                  {playerStatsList.length === 0 ? (
-                    <div className="text-center py-20 text-gray-400 font-bold">아직 종료된 대국이 없습니다.</div>
+                  <div className="relative">
+                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><Search size={16} className="text-gray-400" /></div>
+                    <input type="text" placeholder="플레이어 검색..." value={statsSearchQuery} onChange={(e) => setStatsSearchQuery(e.target.value)} className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-xl text-sm font-medium focus:outline-none focus:border-[#2E7D32]" />
+                  </div>
+
+                  {filteredPlayerStatsList.length === 0 ? (
+                    <div className="text-center py-20 text-gray-400 font-bold">대국 기록이 없거나 검색 결과가 없습니다.</div>
                   ) : (
-                    playerStatsList.map(stat => (
+                    filteredPlayerStatsList.map(stat => (
                       <div key={stat.name} onClick={() => setSelectedStatPlayerName(stat.name)} className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden cursor-pointer hover:shadow-md transition-all active:scale-[0.98]">
                         <div className="p-4 border-b border-gray-100 flex justify-between items-center">
                           <div>
                             <h3 className="font-bold text-xl text-gray-800">{stat.name}</h3>
                             <span className="text-xs text-gray-500 font-bold mt-1 inline-block">{stat.gamesPlayed}국 </span>
                           </div>
-                          <div className="bg-green-50 p-3 rounded-xl border border-green-100 text-center min-w-[80px]">
-                            <span className="block text-[10px] text-gray-500 font-bold mb-0.5">현재 우마</span>
-                            <span className={`text-xl font-black ${stat.totalUma > 0 ? 'text-[#2E7D32]' : stat.totalUma < 0 ? 'text-red-500' : 'text-gray-700'}`}>{stat.totalUma > 0 ? '+' : ''}{stat.totalUma.toFixed(1)}</span>
-                          </div>
+                          
+                          {statsMainTab === '전체' ? (
+                            <div className="flex gap-2">
+                              <div className="bg-green-50 p-2 rounded-xl border border-green-100 text-center w-[72px] shrink-0 flex flex-col justify-center">
+                                <span className="block text-[9px] text-gray-500 font-bold mb-0.5">4인 우마</span>
+                                <span className={`text-sm font-black ${stat.totalUma4 > 0 ? 'text-[#2E7D32]' : stat.totalUma4 < 0 ? 'text-red-500' : 'text-gray-700'} truncate`}>{stat.totalUma4 > 0 ? '+' : ''}{stat.totalUma4.toFixed(1)}</span>
+                              </div>
+                              <div className="bg-blue-50 p-2 rounded-xl border border-blue-100 text-center w-[72px] shrink-0 flex flex-col justify-center">
+                                <span className="block text-[9px] text-gray-500 font-bold mb-0.5">3인 우마</span>
+                                <span className={`text-sm font-black ${stat.totalUma3 > 0 ? 'text-blue-600' : stat.totalUma3 < 0 ? 'text-red-500' : 'text-gray-700'} truncate`}>{stat.totalUma3 > 0 ? '+' : ''}{stat.totalUma3.toFixed(1)}</span>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="bg-green-50 p-3 rounded-xl border border-green-100 text-center min-w-[80px]">
+                              <span className="block text-[10px] text-gray-500 font-bold mb-0.5">현재 우마</span>
+                              <span className={`text-xl font-black ${stat.totalUma > 0 ? 'text-[#2E7D32]' : stat.totalUma < 0 ? 'text-red-500' : 'text-gray-700'}`}>{stat.totalUma > 0 ? '+' : ''}{stat.totalUma.toFixed(1)}</span>
+                            </div>
+                          )}
                         </div>
                         {stat.topYakus.length > 0 && (
                           <div className="p-3 bg-gray-50">
@@ -938,62 +1077,110 @@ function App() {
         )}
 
         {/* ========================================= */}
-        {/* 화면 3: 🏆 전체 랭킹 페이지 */}
+        {/* 화면 3: 🏆 랭킹 페이지 (확장 테이블) */}
         {/* ========================================= */}
         {activeNav === '랭킹' && (
-          <div className="flex-1 flex flex-col bg-[#F5F5DC]">
+          <div className="flex-1 flex flex-col bg-[#F5F5DC] overflow-hidden">
             <div className="flex bg-white border-b border-gray-200 shadow-sm z-10 shrink-0 text-sm">
-              {['전체', '4인', '3인'].map(t => (
+              {['4인', '3인'].map(t => (
                 <button key={t} onClick={() => setRankingMainTab(t)} className={`flex-1 py-3 font-bold ${rankingMainTab === t ? 'bg-[#2E7D32] text-white' : 'text-gray-500 bg-gray-50 border-b-2 border-gray-200 hover:bg-gray-100'}`}>{t} 순위</button>
               ))}
             </div>
             
-            <div className="p-4 space-y-4">
-              <div className="bg-white p-3 rounded-xl shadow-sm border border-gray-200 flex items-center justify-between">
-                <span className="text-xs font-bold text-gray-500 flex items-center gap-1"><BarChart2 size={14}/> 정렬 기준</span>
-                <select value={rankingSort} onChange={e=>setRankingSort(e.target.value)} className="bg-gray-50 border border-gray-200 text-gray-800 text-sm font-bold rounded-lg px-2 py-1.5 focus:outline-none">
-                  <option value="totalUma">누적 우마</option>
-                  <option value="avgUma">평균 우마</option>
-                  <option value="maxScore">최고 점수</option>
-                  <option value="firstRate">1위율 (%)</option>
-                  <option value="rentaiRate">연대율 (%)</option>
-                  <option value="tobiRate">들통율 (%)</option>
-                  <option value="gameCount">대국 수</option>
-                </select>
+            <div className="p-4 space-y-4 flex-1 flex flex-col h-full">
+              <div className="bg-white p-3 rounded-xl shadow-sm border border-gray-200 flex items-center justify-between shrink-0">
+                <span className="text-xs font-bold text-gray-500 flex items-center gap-1"><BarChart2 size={14}/> 테이블 헤더를 터치하여 정렬하세요</span>
               </div>
 
               {rankingList.length === 0 ? (
-                <div className="text-center py-20 text-gray-400 font-bold bg-white rounded-2xl shadow-sm border border-gray-100"><Trophy size={48} className="mx-auto mb-4 text-gray-300" /><p>아직 종료된 대국이 없어</p><p>순위를 매길 수 없습니다.</p></div>
+                <div className="text-center py-20 text-gray-400 font-bold bg-white rounded-2xl shadow-sm border border-gray-100 shrink-0"><Trophy size={48} className="mx-auto mb-4 text-gray-300" /><p>아직 종료된 대국이 없어</p><p>순위를 매길 수 없습니다.</p></div>
               ) : (
-                <div className="space-y-3">
-                  {rankingList.map((player) => {
-                    let highlightText = ''; let highlightLabel = '';
-                    if(rankingSort === 'totalUma') { highlightText = (player.totalUma>0?'+':'')+player.totalUma.toFixed(1); highlightLabel = '우마 합'; }
-                    if(rankingSort === 'avgUma') { highlightText = (player.avgUma>0?'+':'')+player.avgUma; highlightLabel = '평균 우마'; }
-                    if(rankingSort === 'maxScore') { highlightText = Number(player.maxScore).toLocaleString(); highlightLabel = '최고 점수'; }
-                    if(rankingSort === 'firstRate') { highlightText = player.firstRate+'%'; highlightLabel = '1위율'; }
-                    if(rankingSort === 'rentaiRate') { highlightText = player.rentaiRate+'%'; highlightLabel = '연대율'; }
-                    if(rankingSort === 'tobiRate') { highlightText = player.tobiRate+'%'; highlightLabel = '들통율'; }
-                    if(rankingSort === 'gameCount') { highlightText = player.gamesPlayed+'국'; highlightLabel = '대국 수'; }
-
-                    return (
-                      <div key={player.name} className="bg-white p-4 rounded-[20px] shadow-sm border border-gray-100 flex items-center justify-between animate-in fade-in slide-in-from-bottom-2">
-                        <div className="flex items-center gap-4">
-                          <div className={`w-10 h-10 rounded-full flex items-center justify-center font-black text-white shadow-inner text-lg ${player.rank === 1 ? 'bg-yellow-400' : player.rank === 2 ? 'bg-gray-400' : player.rank === 3 ? 'bg-amber-600' : 'bg-gray-200 text-gray-600'}`}>{player.rank}</div>
-                          <div>
-                            <h3 className="font-bold text-base text-gray-800 leading-tight">{player.name}</h3>
-                            <div className="text-[10px] text-gray-500 font-bold mt-1 flex gap-1.5 items-center">
-                              <span className="bg-gray-100 px-1.5 py-0.5 rounded">{player.gamesPlayed}국</span>
-                            </div>
-                          </div>
-                        </div>
-                        <div className="text-right flex flex-col items-end">
-                          <div className={`text-lg font-black tracking-tighter ${rankingSort==='totalUma'||rankingSort==='avgUma' ? (parseFloat(highlightText)>0?'text-[#2E7D32]':parseFloat(highlightText)<0?'text-red-500':'text-gray-500') : 'text-gray-800'}`}>{highlightText}</div>
-                          <div className="text-[9px] text-gray-400 font-bold mt-0.5">{highlightLabel}</div>
-                        </div>
-                      </div>
-                    )
-                  })}
+                <div className="flex-1 overflow-auto bg-white rounded-xl shadow-sm border border-gray-200 relative">
+                  <table className="w-full min-w-max text-xs sm:text-sm text-center whitespace-nowrap table-auto border-collapse">
+                    <thead className="bg-gray-100 sticky top-0 z-20 font-bold text-gray-700 shadow-sm">
+                      <tr>
+                        <th className="sticky left-0 bg-gray-100 z-30 p-3 border-b border-r border-gray-300 cursor-pointer hover:bg-gray-200" onClick={() => requestRankingSort('name')}><div className="flex items-center justify-center gap-1">작사 이름 <ArrowUpDown size={10}/></div></th>
+                        <th className="p-3 border-b border-gray-300 cursor-pointer hover:bg-gray-200" onClick={() => requestRankingSort('gamesPlayed')}><div className="flex items-center justify-center gap-1">대국수 <ArrowUpDown size={10}/></div></th>
+                        <th className="p-3 border-b border-gray-300 cursor-pointer hover:bg-gray-200" onClick={() => requestRankingSort('totalUma')}><div className="flex items-center justify-center gap-1">총 우마 <ArrowUpDown size={10}/></div></th>
+                        <th className="p-3 border-b border-gray-300 cursor-pointer hover:bg-gray-200" onClick={() => requestRankingSort('avgUma')}><div className="flex items-center justify-center gap-1">평균 우마 <ArrowUpDown size={10}/></div></th>
+                        <th className="p-3 border-b border-gray-300 cursor-pointer hover:bg-gray-200" onClick={() => requestRankingSort('rank1Count')}><div className="flex items-center justify-center gap-1">1등수 <ArrowUpDown size={10}/></div></th>
+                        <th className="p-3 border-b border-gray-300 cursor-pointer hover:bg-gray-200" onClick={() => requestRankingSort('firstRate')}><div className="flex items-center justify-center gap-1">1등 비율 <ArrowUpDown size={10}/></div></th>
+                        <th className="p-3 border-b border-gray-300 cursor-pointer hover:bg-gray-200" onClick={() => requestRankingSort('rank2Count')}><div className="flex items-center justify-center gap-1">2등수 <ArrowUpDown size={10}/></div></th>
+                        <th className="p-3 border-b border-gray-300 cursor-pointer hover:bg-gray-200" onClick={() => requestRankingSort('secondRate')}><div className="flex items-center justify-center gap-1">2등 비율 <ArrowUpDown size={10}/></div></th>
+                        <th className="p-3 border-b border-gray-300 cursor-pointer hover:bg-gray-200" onClick={() => requestRankingSort('rank3Count')}><div className="flex items-center justify-center gap-1">3등수 <ArrowUpDown size={10}/></div></th>
+                        <th className="p-3 border-b border-gray-300 cursor-pointer hover:bg-gray-200" onClick={() => requestRankingSort('thirdRate')}><div className="flex items-center justify-center gap-1">3등 비율 <ArrowUpDown size={10}/></div></th>
+                        
+                        {rankingMainTab === '4인' && (
+                          <>
+                            <th className="p-3 border-b border-gray-300 cursor-pointer hover:bg-gray-200" onClick={() => requestRankingSort('rank4Count')}><div className="flex items-center justify-center gap-1">4등수 <ArrowUpDown size={10}/></div></th>
+                            <th className="p-3 border-b border-gray-300 cursor-pointer hover:bg-gray-200" onClick={() => requestRankingSort('fourthRate')}><div className="flex items-center justify-center gap-1">4등 비율 <ArrowUpDown size={10}/></div></th>
+                            <th className="p-3 border-b border-gray-300 cursor-pointer hover:bg-gray-200 text-blue-600" onClick={() => requestRankingSort('rentaiRate')}><div className="flex items-center justify-center gap-1">연대율 <ArrowUpDown size={10}/></div></th>
+                          </>
+                        )}
+                        
+                        <th className="p-3 border-b border-gray-300 cursor-pointer hover:bg-gray-200" onClick={() => requestRankingSort('tobiCount')}><div className="flex items-center justify-center gap-1">들통수 <ArrowUpDown size={10}/></div></th>
+                        <th className="p-3 border-b border-gray-300 cursor-pointer hover:bg-gray-200" onClick={() => requestRankingSort('tobiRate')}><div className="flex items-center justify-center gap-1">들통율 <ArrowUpDown size={10}/></div></th>
+                        <th className="p-3 border-b border-gray-300 cursor-pointer hover:bg-gray-200" onClick={() => requestRankingSort('avgScore')}><div className="flex items-center justify-center gap-1">평균 점수 <ArrowUpDown size={10}/></div></th>
+                        <th className="p-3 border-b border-gray-300 cursor-pointer hover:bg-gray-200" onClick={() => requestRankingSort('maxScore')}><div className="flex items-center justify-center gap-1">최고 점수 <ArrowUpDown size={10}/></div></th>
+                        <th className="p-3 border-b border-gray-300 cursor-pointer hover:bg-gray-200" onClick={() => requestRankingSort('minScore')}><div className="flex items-center justify-center gap-1">최소 점수 <ArrowUpDown size={10}/></div></th>
+                        <th className="p-3 border-b border-gray-300 cursor-pointer hover:bg-gray-200" onClick={() => requestRankingSort('winCount')}><div className="flex items-center justify-center gap-1">화료수 <ArrowUpDown size={10}/></div></th>
+                        <th className="p-3 border-b border-gray-300 cursor-pointer hover:bg-gray-200" onClick={() => requestRankingSort('winRate')}><div className="flex items-center justify-center gap-1">화료율 <ArrowUpDown size={10}/></div></th>
+                        <th className="p-3 border-b border-gray-300 cursor-pointer hover:bg-gray-200" onClick={() => requestRankingSort('dealInCount')}><div className="flex items-center justify-center gap-1">방총수 <ArrowUpDown size={10}/></div></th>
+                        <th className="p-3 border-b border-gray-300 cursor-pointer hover:bg-gray-200" onClick={() => requestRankingSort('dealInRate')}><div className="flex items-center justify-center gap-1">방총율 <ArrowUpDown size={10}/></div></th>
+                        <th className="p-3 border-b border-gray-300 cursor-pointer hover:bg-gray-200" onClick={() => requestRankingSort('avgWinScore')}><div className="flex items-center justify-center gap-1">평균 타점 <ArrowUpDown size={10}/></div></th>
+                        <th className="p-3 border-b border-gray-300 cursor-pointer hover:bg-gray-200" onClick={() => requestRankingSort('maxWinScore')}><div className="flex items-center justify-center gap-1">최고 타점 <ArrowUpDown size={10}/></div></th>
+                        <th className="p-3 border-b border-gray-300 cursor-pointer hover:bg-gray-200" onClick={() => requestRankingSort('avgDealInScore')}><div className="flex items-center justify-center gap-1">평균 방총점 <ArrowUpDown size={10}/></div></th>
+                        <th className="p-3 border-b border-gray-300 cursor-pointer hover:bg-gray-200" onClick={() => requestRankingSort('maxDealInScore')}><div className="flex items-center justify-center gap-1">최고 방총점 <ArrowUpDown size={10}/></div></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {rankingList.map((player, idx) => (
+                        <tr key={player.name} className={`border-b border-gray-100 hover:bg-green-50 transition-colors ${idx % 2 === 1 ? 'bg-gray-50' : 'bg-white'}`}>
+                          <td 
+                            className="sticky left-0 p-3 border-r border-gray-200 font-bold text-gray-800 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)] cursor-pointer hover:text-[#2E7D32] underline decoration-green-300 decoration-2 underline-offset-4" 
+                            style={{ backgroundColor: idx % 2 === 1 ? '#f9fafb' : '#ffffff' }}
+                            onClick={() => { setSelectedStatPlayerName(player.name); setPlayerStatTab(rankingMainTab); }}
+                          >
+                            {player.name}
+                          </td>
+                          <td className="p-3 text-gray-600">{player.gamesPlayed}국</td>
+                          <td className={`p-3 font-black ${player.totalUma > 0 ? 'text-[#2E7D32]' : player.totalUma < 0 ? 'text-red-500' : ''}`}>{player.totalUma > 0 ? `+${player.totalUma.toFixed(1)}` : player.totalUma.toFixed(1)}</td>
+                          <td className="p-3 text-gray-600 ">{player.avgUma > 0 ? `+${player.avgUma}` : player.avgUma}</td>
+                          <td className="p-3 text-gray-600">{player.rank1Count}</td>
+                          <td className="p-3 text-gray-600">{player.firstRate}%</td>
+                          <td className="p-3 text-gray-600">{player.rank2Count}</td>
+                          <td className="p-3 text-gray-600">{player.secondRate}%</td>
+                          <td className="p-3 text-gray-600">{player.rank3Count}</td>
+                          <td className="p-3 text-gray-600">{player.thirdRate}%</td>
+                          
+                          {rankingMainTab === '4인' && (
+                            <>
+                              <td className="p-3">{player.rank4Count}</td>
+                              <td className="p-3 text-gray-600">{player.fourthRate}%</td>
+                              <td className="p-3 text-blue-600">{player.rentaiRate}%</td>
+                            </>
+                          )}
+                          
+                          <td className="p-3">{player.tobiCount}</td>
+                          <td className="p-3 font-medium text-gray-600">{player.tobiRate}%</td>
+                          <td className="p-3 font-medium text-gray-600">{Number(player.avgScore).toLocaleString()}</td>
+                          {/* 💡 값이 없을 때 '-' 대신 '0' 표기 */}
+                          <td className="p-3 font-medium text-gray-600">{player.maxScore === -99999 ? 0 : Number(player.maxScore).toLocaleString()}</td>
+                          <td className="p-3 font-medium text-gray-600">{player.minScore === 99999 ? 0 : Number(player.minScore).toLocaleString()}</td>
+                          <td className="p-3 font-medium text-gray-600">{player.winCount}</td>
+                          <td className="p-3 font-bold text-[#2E7D32]">{player.winRate}%</td>
+                          <td className="p-3 font-medium text-gray-600">{player.dealInCount}</td>
+                          <td className="p-3 font-bold text-orange-500">{player.dealInRate}%</td>
+                          <td className="p-3 font-bold text-[#2E7D32]">{Number(player.avgWinScore).toLocaleString()}</td>
+                          {/* 💡 값이 없을 때 '-' 대신 '0' 표기 */}
+                          <td className="p-3 font-bold text-[#2E7D32]">{player.maxWinScore > 0 ? Number(player.maxWinScore).toLocaleString() : 0}</td>
+                          <td className="p-3 font-bold text-orange-500">{Number(player.avgDealInScore).toLocaleString()}</td>
+                          {/* 💡 값이 없을 때 '-' 대신 '0' 표기 */}
+                          <td className="p-3 font-bold text-orange-500">{player.maxDealInScore > 0 ? Number(player.maxDealInScore).toLocaleString() : 0}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
               )}
             </div>
@@ -1007,11 +1194,23 @@ function App() {
           <div className="flex-1 flex flex-col p-4 space-y-4">
             <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-200 animate-in fade-in slide-in-from-bottom-2">
               <div className="flex items-center justify-between mb-4 border-b border-gray-100 pb-3">
+                <span className="font-black text-[#2E7D32] text-xl">v1.0.1</span>
+                <span className="text-sm font-bold text-gray-400">2026/03/06</span>
+              </div>
+              <ul className="text-sm font-bold text-gray-700 space-y-2 pl-2 list-disc list-inside">
+                <li>모바일 환경에서 최종점수가 음수인 경우 입력되지 않는 현상을 수정하였습니다.</li>
+                <li>대국이 종료된 후 각 국의 점수를 표시하는 기능을 추가하였습니다.</li>
+                <li>방총자 선택 방식을 더블클릭에서 길게 누르기로 변경하였습니다.</li>
+                <li>비멘젠으로 화료할 경우, 멘젠 한정 역은 비활성화되는 기능을 추가하였습니다.</li>
+              </ul>
+            </div>
+            <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-200 animate-in fade-in slide-in-from-bottom-2">
+              <div className="flex items-center justify-between mb-4 border-b border-gray-100 pb-3">
                 <span className="font-black text-[#2E7D32] text-xl">v1.0.0</span>
                 <span className="text-sm font-bold text-gray-400">2026/03/05</span>
               </div>
               <ul className="text-sm font-bold text-gray-700 space-y-2 pl-2 list-disc list-inside">
-                <li>리치 마작 기록 및 통계 페이지 오픈</li>
+                <li>리치 마작 기록 페이지 오픈</li>
               </ul>
             </div>
           </div>
@@ -1063,11 +1262,11 @@ function App() {
               (selectedSeason === 'all' || g.seasonId === selectedSeason)
             );
 
-            // 💡 2. 모든 세부 통계 변수 초기화
-            let playCount = 0, tScore = 0, tUma = 0, tRank = 0;
+            let playCount = 0, tScore = 0, tUma = 0, tRank = 0, rCount = 0; // 💡 rCount(라운드 수) 추가
+            let tUma4 = 0, tUma3 = 0;
             let ranks = [0, 0, 0, 0];
             let wCount = 0, wScore = 0, wScoreCount = 0, dCount = 0, dScore = 0, dScoreCount = 0, mHonba = 0;
-            let maxScore = -99999, minScore = 99999;
+            let maxScore = -99999, minScore = 99999, maxWinScore = 0, maxDealInScore = 0; // 💡 최고 타점/방총점 초기화 추가
             let tobiCount = 0, yakumanCount = 0, chomboCount = 0;
             let yakus = {};
             let waitTypes = {};
@@ -1077,15 +1276,16 @@ function App() {
             modalGames.forEach(g => {
                 const pIdx = g.players.indexOf(selectedStatPlayer.name);
                 if(g.finalResults && g.finalResults[pIdx]) {
-                    // 💡 순위를 점수 기반으로 실시간 계산 (db에 rank가 직접 저장되지 않으므로)
                     const sortedResults = g.finalResults.map((r, i) => ({ score: Number(r.score), originalIndex: i })).sort((a, b) => b.score - a.score);
                     const myRankIndex = sortedResults.findIndex(r => r.originalIndex === pIdx);
                     
                     const finalScore = Number(g.finalResults[pIdx].score);
-                    const finalPt = Number(g.finalResults[pIdx].pt); // 💡 uma가 아니라 pt 속성을 참조해야 함
+                    const finalPt = Number(g.finalResults[pIdx].pt);
 
                     tScore += finalScore;
                     tUma += finalPt;
+                    if (g.type === '4인') tUma4 += finalPt;
+                    if (g.type === '3인') tUma3 += finalPt;
                     tRank += (myRankIndex + 1);
                     ranks[myRankIndex] += 1;
                     playCount++;
@@ -1095,11 +1295,21 @@ function App() {
                     if (finalScore < 0) tobiCount++;
                 }
                 g.rounds.forEach(r => {
+                    rCount++; // 💡 플레이한 전체 라운드 수 합산
                     if(r.type === '촌보' && r.chomboPlayer === selectedStatPlayer.name) chomboCount++;
                     if(r.type === '화료' && r.winner === selectedStatPlayer.name) {
                         wCount++;
-                        const s = parseInt(String(r.score||'0').replace(/[^0-9]/g, ''), 10);
-                        if(s > 0) { wScore += s; wScoreCount++; } // 💡 점수가 있을 때만 wScoreCount 증가
+                        
+                        // 자동 계산 로직 적용 (본장 0 처리하여 순수 점수 추출)
+                        const dealerIndex = (r.roundNum - 1) % g.players.length;
+                        const isDealer = g.players.indexOf(r.winner) === dealerIndex;
+                        const isTsumo = r.winType === '쯔모';
+                        const { pureTotal } = getMahjongScore(r.han, r.fu, isDealer, isTsumo, 0, g.type === '3인');
+
+                        if (pureTotal > 0) { 
+                          wScore += pureTotal; wScoreCount++; 
+                          if (pureTotal > maxWinScore) maxWinScore = pureTotal; // 💡 최고 타점 기록
+                        }
                         if(r.honba > mHonba) mHonba = r.honba;
                         
                         if (r.selectedYaku && r.selectedYaku.some(y => yakuData['역만']?.includes(y) || yakuData['더블역만']?.includes(y))) yakumanCount++;
@@ -1114,9 +1324,9 @@ function App() {
                         if (r.waitType) waitTypes[r.waitType] = (waitTypes[r.waitType] || 0) + 1;
 
                         const isMenzen = r.menzen === '멘젠';
-                        if (isMenzen && r.winType === '쯔모') menzenTsumo++;
+                        if (isMenzen && isTsumo) menzenTsumo++;
                         if (isMenzen && r.winType === '론') menzenRon++;
-                        if (!isMenzen && r.winType === '쯔모') furoTsumo++;
+                        if (!isMenzen && isTsumo) furoTsumo++;
                         if (!isMenzen && r.winType === '론') furoRon++;
                         
                         if (!isMenzen) furoWinCount++;
@@ -1124,24 +1334,29 @@ function App() {
                     }
                     if(r.type === '화료' && r.winType === '론' && r.loser === selectedStatPlayer.name) {
                         dCount++;
-                        const s = parseInt(String(r.score||'0').replace(/[^0-9]/g, ''), 10);
-                        if(s > 0) { dScore += s; dScoreCount++; } // 💡 점수가 있을 때만 dScoreCount 증가
+                        const dealerIndex = (r.roundNum - 1) % g.players.length;
+                        const isDealer = g.players.indexOf(r.winner) === dealerIndex;
+                        const { pureTotal } = getMahjongScore(r.han, r.fu, isDealer, false, 0, g.type === '3인');
+                        if(pureTotal > 0) { 
+                          dScore += pureTotal; dScoreCount++; 
+                          if (pureTotal > maxDealInScore) maxDealInScore = pureTotal; // 💡 최고 방총점 기록
+                        }
                     }
                 });
             });
 
             const mStat = {
-                gamesPlayed: playCount, totalUma: tUma, winCount: wCount, dealInCount: dCount, 
+                gamesPlayed: playCount, totalUma: tUma, totalUma4: tUma4, totalUma3: tUma3, winCount: wCount, dealInCount: dCount, 
                 yakumanCount, chomboCount, ranks, tobiCount,
                 tobiRate: playCount > 0 ? ((tobiCount / playCount) * 100).toFixed(1) : 0,
                 rentaiRate: playCount > 0 ? (((ranks[0] + ranks[1]) / playCount) * 100).toFixed(1) : 0,
-                maxScore, minScore, 
+                winRate: rCount > 0 ? ((wCount / rCount) * 100).toFixed(1) : 0, // 💡 화료율 추가
+                dealInRate: rCount > 0 ? ((dCount / rCount) * 100).toFixed(1) : 0, // 💡 방총율 추가
+                maxScore, minScore, maxWinScore, maxDealInScore, // 💡 최고타점,방총점 객체에 포함
                 avgScore: playCount > 0 ? Math.floor(tScore / playCount) : 0,
-                avgWinScore: wScoreCount > 0 ? Math.floor(wScore / wScoreCount) : 0, // 💡 무조건 화료 횟수가 아닌, '점수가 입력된 횟수'로 나눔
-                avgRank: playCount > 0 ? (tRank / playCount).toFixed(2) : 0,
+                avgWinScore: wScoreCount > 0 ? Math.floor(wScore / wScoreCount) : 0,
                 avgUma: playCount > 0 ? (tUma / playCount).toFixed(1) : 0,
-                maxHonba: mHonba, 
-                avgDealInScore: dScoreCount > 0 ? Math.floor(dScore / dScoreCount) : 0, // 💡 방총점도 동일
+                maxHonba: mHonba, avgDealInScore: dScoreCount > 0 ? Math.floor(dScore / dScoreCount) : 0,
                 yakus, riichiWinCount, damaWinCount, furoWinCount, menzenTsumo, menzenRon, furoTsumo, furoRon, waitTypes
             };
 
@@ -1169,48 +1384,69 @@ function App() {
                 <div className="flex-1 overflow-y-auto p-4 space-y-4">
                   <div className="grid grid-cols-2 gap-3">
                     <div className="bg-white p-3 rounded-xl shadow-sm border border-gray-200 text-center"><span className="block text-[10px] text-gray-500 font-bold mb-1">대국 수</span><span className="text-xl font-black text-gray-800">{mStat.gamesPlayed}국</span></div>
-                    <div className="bg-green-50 p-3 rounded-xl shadow-sm border border-green-200 text-center"><span className="block text-[10px] text-green-700 font-bold mb-1">현재 우마</span><span className={`text-xl font-black ${mStat.totalUma > 0 ? 'text-[#2E7D32]' : mStat.totalUma < 0 ? 'text-red-500' : 'text-gray-800'}`}>{mStat.totalUma > 0 ? '+' : ''}{mStat.totalUma.toFixed(1)}</span></div>
+                    {playerStatTab === '전체' ? (
+                       <div className="grid grid-cols-2 gap-2">
+                         <div className="bg-green-50 p-2 rounded-xl border border-green-100 text-center flex flex-col justify-center">
+                           <span className="block text-[9px] text-gray-500 font-bold mb-0.5">4인 우마</span>
+                           <span className={`text-lg font-black ${mStat.totalUma4 > 0 ? 'text-[#2E7D32]' : mStat.totalUma4 < 0 ? 'text-red-500' : 'text-gray-800'}`}>{mStat.totalUma4 > 0 ? '+' : ''}{mStat.totalUma4.toFixed(1)}</span>
+                         </div>
+                         <div className="bg-blue-50 p-2 rounded-xl border border-blue-100 text-center flex flex-col justify-center">
+                           <span className="block text-[9px] text-gray-500 font-bold mb-0.5">3인 우마</span>
+                           <span className={`text-lg font-black ${mStat.totalUma3 > 0 ? 'text-blue-600' : mStat.totalUma3 < 0 ? 'text-red-500' : 'text-gray-800'}`}>{mStat.totalUma3 > 0 ? '+' : ''}{mStat.totalUma3.toFixed(1)}</span>
+                         </div>
+                       </div>
+                    ) : (
+                      <div className="bg-green-50 p-3 rounded-xl shadow-sm border border-green-200 text-center"><span className="block text-[10px] text-green-700 font-bold mb-1">현재 우마</span><span className={`text-xl font-black ${mStat.totalUma > 0 ? 'text-[#2E7D32]' : mStat.totalUma < 0 ? 'text-red-500' : 'text-gray-800'}`}>{mStat.totalUma > 0 ? '+' : ''}{mStat.totalUma.toFixed(1)}</span></div>
+                    )}
                   </div>
 
-                  <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
-                    <h3 className="text-sm font-bold text-gray-800 mb-3 flex items-center gap-1.5"><BarChart size={16}/> 상세 통계</h3>
-                    <div className="grid grid-cols-4 gap-2 text-center text-sm font-medium mb-3">
-                      <div className="flex flex-col gap-1"><span className="text-[10px] text-gray-500 font-bold">화료수</span><span className="font-black text-[#2E7D32]">{mStat.winCount}회</span></div>
-                      <div className="flex flex-col gap-1"><span className="text-[10px] text-gray-500 font-bold">방총수</span><span className="font-black text-orange-500">{mStat.dealInCount}회</span></div>
-                      <div className="flex flex-col gap-1"><span className="text-[10px] text-gray-500 font-bold">역만수</span><span className="font-black text-red-600">{mStat.yakumanCount}회</span></div>
-                      <div className="flex flex-col gap-1"><span className="text-[10px] text-gray-500 font-bold">쵼보수</span><span className="font-black text-purple-600">{mStat.chomboCount}회</span></div>
-                    </div>
+                  {/* 💡 요청 반영: '전체' 탭이 아닐 때만(4인/3인 탭) 상세 통계와 평균 지표 렌더링 */}
+                  {playerStatTab !== '전체' && (
+                    <>
+                      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
+                        <h3 className="text-sm font-bold text-gray-800 mb-3 flex items-center gap-1.5"><BarChart size={16}/> 상세 통계</h3>
+                        <div className="grid grid-cols-4 gap-2 text-center text-sm font-medium mb-3">
+                          <div className="flex flex-col gap-1"><span className="text-[10px] text-gray-500 font-bold">화료</span><span className="font-black text-[#2E7D32]">{mStat.winCount}회 <span className="text-[10px] font-bold text-gray-400">({mStat.winRate}%)</span></span></div>
+                          <div className="flex flex-col gap-1"><span className="text-[10px] text-gray-500 font-bold">방총</span><span className="font-black text-orange-500">{mStat.dealInCount}회 <span className="text-[10px] font-bold text-gray-400">({mStat.dealInRate}%)</span></span></div>
+                          <div className="flex flex-col gap-1"><span className="text-[10px] text-gray-500 font-bold">역만수</span><span className="font-black text-red-600">{mStat.yakumanCount}회</span></div>
+                          <div className="flex flex-col gap-1"><span className="text-[10px] text-gray-500 font-bold">쵼보수</span><span className="font-black text-purple-600">{mStat.chomboCount}회</span></div>
+                        </div>
 
-                    <div className={`grid ${playerStatTab === '3인' ? 'grid-cols-3' : 'grid-cols-4'} gap-2 text-center text-sm font-medium mb-3 bg-gray-50 p-2 rounded-lg`}>
-                      {[1, 2, 3, 4].map(rank => {
-                        if (playerStatTab === '3인' && rank === 4) return null;
-                        const count = mStat.ranks[rank-1];
-                        const pct = mStat.gamesPlayed > 0 ? ((count / mStat.gamesPlayed) * 100).toFixed(0) : 0;
-                        return (
-                          <div key={rank} className="flex flex-col gap-0.5"><span className="text-[10px] font-bold text-gray-600">{rank}등수</span><span className="font-black text-gray-800">{count}회</span><span className="text-[9px] text-gray-400">({pct}%)</span></div>
-                        )
-                      })}
-                    </div>
+                        <div className={`grid ${playerStatTab === '3인' ? 'grid-cols-3' : 'grid-cols-4'} gap-2 text-center text-sm font-medium mb-3 bg-gray-50 p-2 rounded-lg`}>
+                          {[1, 2, 3, 4].map(rank => {
+                            if (playerStatTab === '3인' && rank === 4) return null;
+                            const count = mStat.ranks[rank-1];
+                            const pct = mStat.gamesPlayed > 0 ? ((count / mStat.gamesPlayed) * 100).toFixed(0) : 0;
+                            return (
+                              <div key={rank} className="flex flex-col gap-0.5"><span className="text-[10px] font-bold text-gray-600">{rank}등수</span><span className="font-black text-gray-800">{count}회</span><span className="text-[9px] text-gray-400">({pct}%)</span></div>
+                            )
+                          })}
+                        </div>
 
-                    <div className={`grid ${playerStatTab === '3인' ? 'grid-cols-1' : 'grid-cols-2'} gap-2 text-center text-sm font-medium`}>
-                      {playerStatTab !== '3인' && (
-                        <div className="flex flex-col gap-1 border border-blue-100 bg-blue-50 py-2 rounded-lg"><span className="text-[10px] text-blue-700 font-bold">연대율</span><span className="font-black text-blue-600 text-base">{mStat.rentaiRate}%</span></div>
-                      )}
-                      <div className="flex flex-col gap-1 border border-slate-200 bg-slate-50 py-2 rounded-lg"><span className="text-[10px] text-slate-600 font-bold">들통율 (토비)</span><span className="font-black text-slate-700 text-base">{mStat.tobiCount}회 <span className="text-xs font-medium">({mStat.tobiRate}%)</span></span></div>
-                    </div>
-                  </div>
+                        <div className={`grid ${playerStatTab === '3인' ? 'grid-cols-1' : 'grid-cols-2'} gap-2 text-center text-sm font-medium`}>
+                          {playerStatTab !== '3인' && (
+                            <div className="flex flex-col gap-1 border border-blue-100 bg-blue-50 py-2 rounded-lg"><span className="text-[10px] text-blue-700 font-bold">연대율</span><span className="font-black text-blue-600 text-base">{mStat.rentaiRate}%</span></div>
+                          )}
+                          <div className="flex flex-col gap-1 border border-slate-200 bg-slate-50 py-2 rounded-lg"><span className="text-[10px] text-slate-600 font-bold">들통율 (토비)</span><span className="font-black text-slate-700 text-base">{mStat.tobiCount}회 <span className="text-xs font-medium">({mStat.tobiRate}%)</span></span></div>
+                        </div>
+                      </div>
 
-                  <div className="grid grid-cols-4 gap-2 text-center">
-                    <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-2"><span className="block text-[9px] text-gray-500 font-bold mb-1">최고 점수</span><span className="text-sm font-black text-gray-800">{mStat.maxScore === -99999 ? '-' : Number(mStat.maxScore).toLocaleString()}</span></div>
-                    <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-2"><span className="block text-[9px] text-gray-500 font-bold mb-1">최소 점수</span><span className="text-sm font-black text-gray-800">{mStat.minScore === 99999 ? '-' : Number(mStat.minScore).toLocaleString()}</span></div>
-                    <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-2"><span className="block text-[9px] text-gray-500 font-bold mb-1">평균 소점</span><span className="text-sm font-black text-gray-800">{Number(mStat.avgScore).toLocaleString()}</span></div>
-                    <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-2"><span className="block text-[9px] text-gray-500 font-bold mb-1">평균 타점</span><span className="text-sm font-black text-[#2E7D32]">{Number(mStat.avgWinScore).toLocaleString()}점</span></div>
-                    <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-2"><span className="block text-[9px] text-gray-500 font-bold mb-1">평균 순위</span><span className="text-sm font-black text-amber-600">{mStat.avgRank}위</span></div>
-                    <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-2"><span className="block text-[9px] text-gray-500 font-bold mb-1">평균 우마</span><span className="text-sm font-black text-gray-800">{mStat.avgUma}</span></div>
-                    <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-2"><span className="block text-[9px] text-gray-500 font-bold mb-1">최대 연장</span><span className="text-sm font-black text-gray-800">{mStat.maxHonba}본장</span></div>
-                    <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-2"><span className="block text-[9px] text-gray-500 font-bold mb-1">평균 방총점</span><span className="text-sm font-black text-orange-500">{Number(mStat.avgDealInScore).toLocaleString()}점</span></div>
-                  </div>
-
+                      {/* 💡 3x3 그리드로 변경 및 최고 타점/방총점 추가 (데이터 없을 시 0 표기) */}
+                      <div className="grid grid-cols-3 gap-2 text-center">
+                        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-2"><span className="block text-[9px] text-gray-500 font-bold mb-1">최고 점수</span><span className="text-sm font-black text-gray-800">{mStat.maxScore === -99999 ? 0 : Number(mStat.maxScore).toLocaleString()}</span></div>
+                        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-2"><span className="block text-[9px] text-gray-500 font-bold mb-1">최소 점수</span><span className="text-sm font-black text-gray-800">{mStat.minScore === 99999 ? 0 : Number(mStat.minScore).toLocaleString()}</span></div>
+                        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-2"><span className="block text-[9px] text-gray-500 font-bold mb-1">평균 소점</span><span className="text-sm font-black text-gray-800">{Number(mStat.avgScore).toLocaleString()}</span></div>
+                        
+                        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-2"><span className="block text-[9px] text-gray-500 font-bold mb-1">최고 타점</span><span className="text-sm font-black text-[#2E7D32]">{mStat.maxWinScore > 0 ? Number(mStat.maxWinScore).toLocaleString() + '점' : '0점'}</span></div>
+                        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-2"><span className="block text-[9px] text-gray-500 font-bold mb-1">평균 타점</span><span className="text-sm font-black text-[#2E7D32]">{Number(mStat.avgWinScore).toLocaleString()}점</span></div>
+                        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-2"><span className="block text-[9px] text-gray-500 font-bold mb-1">평균 우마</span><span className="text-sm font-black text-gray-800">{mStat.avgUma}</span></div>
+                        
+                        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-2"><span className="block text-[9px] text-gray-500 font-bold mb-1">최고 방총점</span><span className="text-sm font-black text-orange-500">{mStat.maxDealInScore > 0 ? Number(mStat.maxDealInScore).toLocaleString() + '점' : '0점'}</span></div>
+                        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-2"><span className="block text-[9px] text-gray-500 font-bold mb-1">평균 방총점</span><span className="text-sm font-black text-orange-500">{Number(mStat.avgDealInScore).toLocaleString()}점</span></div>
+                        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-2"><span className="block text-[9px] text-gray-500 font-bold mb-1">최대 연장</span><span className="text-sm font-black text-gray-800">{mStat.maxHonba}본장</span></div>
+                      </div>
+                    </>
+                  )}
                   <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
                     <h3 className="text-sm font-bold text-gray-800 mb-3">모든 사용 역 현황</h3>
                     {Object.keys(mStat.yakus).length === 0 ? <p className="text-xs text-gray-400">기록된 역이 없습니다.</p> : (
@@ -1296,9 +1532,20 @@ function App() {
               {allUsers.filter(u => u.role !== 'master').map(user => (
                 <div key={user.name} className="bg-white p-3 rounded-xl shadow-sm border border-gray-200">
                   <div className="flex justify-between items-center mb-2"><span className="font-bold text-lg text-gray-800">{user.name}</span><span className={`text-[10px] px-2 py-1 rounded font-bold ${user.role === 'admin' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600'}`}>{user.role === 'admin' ? '🛡️ 관리자' : '♟️ 작사'}</span></div>
+                  
+                  {/* 기존: 관리자 승인 요청 UI */}
                   {user.pendingAdmin && (
                     <div className="bg-yellow-50 border border-yellow-200 p-2 rounded-lg mb-2 flex items-center justify-between"><span className="text-xs font-bold text-yellow-700">⚠️ 관리자 권한 요청됨</span><div className="flex gap-1"><button onClick={() => handleApproveAdmin(user.name)} className="bg-green-500 text-white p-1 rounded hover:bg-green-600"><UserCheck size={16}/></button><button onClick={() => handleRejectAdmin(user.name)} className="bg-gray-400 text-white p-1 rounded hover:bg-gray-500"><X size={16}/></button></div></div>
                   )}
+
+                  {/* 💡 추가됨: 일반 작사 쓰기 권한 승인 대기 UI */}
+                  {user.isApproved === false && !user.pendingAdmin && (
+                    <div className="bg-green-50 border border-green-200 p-2 rounded-lg mb-2 flex items-center justify-between">
+                      <span className="text-xs font-bold text-green-700">⚠️ 쓰기 권한(작사) 요청됨</span>
+                      <button onClick={() => handleApproveUser(user.name)} className="bg-[#2E7D32] text-white px-2 py-1 text-xs font-bold rounded flex items-center gap-1 hover:bg-green-800"><UserCheck size={14}/> 승인</button>
+                    </div>
+                  )}
+
                   <div className="flex gap-2 mt-2">
                     {user.role === 'admin' ? (<button onClick={() => handleDemotePlayer(user.name)} className="flex-1 py-2 bg-orange-100 text-orange-700 font-bold text-xs rounded-lg flex justify-center items-center gap-1 hover:bg-orange-200"><ShieldClose size={14}/> 권한 강등</button>) : (<button onClick={() => handlePromoteAdmin(user.name)} className="flex-1 py-2 bg-blue-50 text-blue-600 font-bold text-xs rounded-lg flex justify-center items-center gap-1 hover:bg-blue-100"><Shield size={14}/> 관리자 임명</button>)}
                     <button onClick={() => handleRemoveUser(user.name)} className="flex-1 py-2 bg-red-50 text-red-600 font-bold text-xs rounded-lg flex justify-center items-center gap-1 hover:bg-red-100"><UserX size={14}/> 회원 삭제</button>
@@ -1358,18 +1605,25 @@ function App() {
         </div>
       )}
 
+      {/* 대국 추가 모달 */}
       {isNewGameModalOpen && (
         <div className="absolute inset-0 bg-black bg-opacity-60 z-50 flex flex-col justify-end animate-in fade-in">
           <div className="bg-[#F5F5DC] w-full h-[80%] rounded-t-3xl shadow-2xl flex flex-col animate-in slide-in-from-bottom">
-            {/* 💡 제목을 activeTab 대신 newGameType으로 변경 */}
             <div className="bg-[#2E7D32] rounded-t-3xl p-4 flex justify-between items-center text-white"><h2 className="text-lg font-bold">{newGameType} 대국 시작</h2><button onClick={() => setIsNewGameModalOpen(false)} className="p-1 hover:bg-green-700 rounded-full"><X size={20} /></button></div>
             <div className="p-5 flex-1 overflow-y-auto">
+              
+              {/* 💡 대국 일자 입력란 추가 */}
+              <div className="flex items-center gap-3 bg-white p-2 rounded-xl shadow-sm border border-gray-100 mb-5">
+                <div className="bg-gray-700 text-white w-8 h-8 rounded-lg flex items-center justify-center font-bold text-sm shadow-inner"><CalendarPlus size={14}/></div>
+                <input type="date" value={newGameDate} onChange={e => setNewGameDate(e.target.value)} className="flex-1 text-sm font-bold bg-transparent focus:outline-none text-gray-800" />
+              </div>
+
               <div className="flex items-center gap-2 mb-4"><Users className="text-[#2E7D32]" /><p className="text-gray-800 font-bold text-sm">초기 좌석을 입력해주세요</p></div>
+              {/* ... (이하 동/남/서/북 입력칸 동일) ... */}
               <div className="space-y-3">
                 <div className="flex items-center gap-3 bg-white p-2 rounded-xl shadow-sm border border-gray-100"><div className="bg-[#2E7D32] text-white w-8 h-8 rounded-lg flex items-center justify-center font-bold text-sm shadow-inner">동</div><input type="text" value={playerE} onChange={e => setPlayerE(e.target.value)} placeholder="동가 이름" className="flex-1 text-sm font-bold bg-transparent focus:outline-none" /></div>
                 <div className="flex items-center gap-3 bg-white p-2 rounded-xl shadow-sm border border-gray-100"><div className="bg-[#2E7D32] text-white w-8 h-8 rounded-lg flex items-center justify-center font-bold text-sm shadow-inner">남</div><input type="text" value={playerS} onChange={e => setPlayerS(e.target.value)} placeholder="남가 이름" className="flex-1 text-sm font-bold bg-transparent focus:outline-none" /></div>
                 <div className="flex items-center gap-3 bg-white p-2 rounded-xl shadow-sm border border-gray-100"><div className="bg-[#2E7D32] text-white w-8 h-8 rounded-lg flex items-center justify-center font-bold text-sm shadow-inner">서</div><input type="text" value={playerW} onChange={e => setPlayerW(e.target.value)} placeholder="서가 이름" className="flex-1 text-sm font-bold bg-transparent focus:outline-none" /></div>
-                {/* 💡 북가 입력칸 표시 조건도 newGameType으로 변경 */}
                 {newGameType === '4인' && (<div className="flex items-center gap-3 bg-white p-2 rounded-xl shadow-sm border border-gray-100"><div className="bg-[#2E7D32] text-white w-8 h-8 rounded-lg flex items-center justify-center font-bold text-sm shadow-inner">북</div><input type="text" value={playerN} onChange={e => setPlayerN(e.target.value)} placeholder="북가 이름" className="flex-1 text-sm font-bold bg-transparent focus:outline-none" /></div>)}
               </div>
               <button onClick={handleCreateNewGame} className="w-full bg-[#2E7D32] text-white font-bold text-sm py-3.5 rounded-xl mt-6 shadow-md hover:bg-green-800 active:scale-[0.98] transition-all">대국 시작하기</button>
@@ -1387,56 +1641,43 @@ function App() {
           </div>
           <div className="flex bg-white shadow-sm z-10 text-sm"><button onClick={() => setRecordMode('화료')} className={`flex-1 py-4 font-bold border-b-4 transition-colors ${recordMode === '화료' ? 'border-[#2E7D32] text-[#2E7D32]' : 'border-transparent text-gray-400'}`}>화료</button><button onClick={() => setRecordMode('유국')} className={`flex-1 py-4 font-bold border-b-4 transition-colors ${recordMode === '유국' ? 'border-gray-600 text-gray-700' : 'border-transparent text-gray-400'}`}>유국</button><button onClick={() => setRecordMode('촌보')} className={`flex-1 py-4 font-bold border-b-4 transition-colors ${recordMode === '촌보' ? 'border-red-500 text-red-600' : 'border-transparent text-gray-400'}`}>촌보</button></div>
           <div className="flex-1 overflow-y-auto p-4 space-y-8 pb-32">
-            <section className="space-y-3">
-              <h3 className="font-bold text-base text-gray-800 border-b pb-1">국 / 본장 / 공탁</h3>
+            
+            {/* 💡 요청 반영: 국풍 균등 배치, 국 번호/본장 같은 행, 공탁 삭제 */}
+            <section className="space-y-2">
+              <h3 className="font-bold text-base text-gray-800 border-b pb-1">국 / 본장</h3>
               
-              <div className="flex flex-wrap gap-3">
-                <div className="flex-1 flex justify-between items-center p-2.5 bg-white rounded-xl border border-gray-100 shadow-sm min-w-[120px]">
-                  <span className="font-bold text-green-700 text-sm">국풍</span>
-                  <div className="flex items-center gap-1.5">
-                    <button onClick={() => {
-                      const winds = ['동', '남', '서', '북'];
-                      setWind(prev => winds[(winds.indexOf(prev) - 1 + 4) % 4]);
-                    }} className="bg-gray-100 w-8 h-8 rounded font-bold hover:bg-gray-200">-</button>
-                    
-                    <span className="font-bold text-lg w-4 text-center text-gray-800">{wind}</span>
-                    
-                    <button onClick={() => {
-                      const winds = ['동', '남', '서', '북'];
-                      setWind(prev => winds[(winds.indexOf(prev) + 1) % 4]);
-                    }} className="bg-gray-100 w-8 h-8 rounded font-bold hover:bg-gray-200">+</button>
-                  </div>
-                </div>
-
-                <div className="flex-1 flex justify-between items-center p-2.5 bg-white rounded-xl border border-gray-100 shadow-sm min-w-[120px]">
-                  <span className="font-bold text-[#2E7D32] text-sm">국</span>
-                  <div className="flex items-center gap-1.5">
-                    <button onClick={() => { setRoundNum(Math.max(1, roundNum - 1)); setHonba(0); }} className="bg-gray-100 w-8 h-8 rounded font-bold hover:bg-gray-200">-</button>
-                    <span className="font-bold text-lg w-4 text-center text-black">{roundNum}</span>
-                    <button onClick={() => { 
-                      const maxRound = currentGame?.type === '3인' ? 3 : 4;
-                      setRoundNum(Math.min(maxRound, roundNum + 1)); 
-                      setHonba(0); 
-                    }} className="bg-gray-100 w-8 h-8 rounded font-bold hover:bg-gray-200">+</button>
-                  </div>
-                </div>
+              {/* 국풍 */}
+              {/* 💡 간격을 gap-4로 통일 */}
+              <div className="flex items-center bg-white p-2.5 rounded-xl border border-gray-100 shadow-sm gap-4">
+                 {/* 💡 글자 영역을 w-8로 고정 */}
+                 <span className="font-bold text-green-700 text-sm w-8 text-center shrink-0 ml-1">국풍</span>
+                 <div className="flex-1 flex gap-1.5">
+                    {['동', '남', '서', '북'].map(w => (
+                      <button key={w} onClick={() => { setWind(w); setHonba(0); }} className={`flex-1 py-1.5 text-sm rounded-lg font-bold border transition-colors ${wind === w ? 'bg-[#2E7D32] border-[#2E7D32] text-white shadow-sm' : 'bg-gray-50 border-gray-200 text-gray-600 hover:bg-gray-100'}`}>{w}</button>
+                    ))}
+                 </div>
               </div>
 
-              <div className="flex gap-3">
+              <div className="flex gap-2">
+                {/* 국 번호 */}
+                {/* 💡 국풍과 똑같이 gap-4 적용 */}
+                <div className="flex-1 flex items-center bg-white p-2.5 rounded-xl border border-gray-100 shadow-sm gap-4">
+                   {/* 💡 국풍과 똑같이 글자 영역을 w-8로 고정하여 버튼 시작 지점을 완벽하게 맞춤 */}
+                   <span className="font-bold text-[#2E7D32] text-sm w-8 text-center shrink-0 ml-1">국</span>
+                   <div className="flex-1 flex gap-1.5">
+                      {(currentGame?.type === '3인' ? [1, 2, 3] : [1, 2, 3, 4]).map(num => (
+                        <button key={num} onClick={() => { setRoundNum(num); setHonba(0); }} className={`flex-1 py-1.5 text-sm rounded-lg font-bold border transition-colors ${roundNum === num ? 'bg-[#2E7D32] border-[#2E7D32] text-white shadow-sm' : 'bg-gray-50 border-gray-200 text-gray-600 hover:bg-gray-100'}`}>{num}</button>
+                      ))}
+                   </div>
+                </div>
+
+                {/* 본장 */}
                 <div className="flex-1 flex justify-between p-2.5 bg-white rounded-xl border border-gray-100 shadow-sm items-center">
-                  <span className="font-bold text-green-700 text-sm">본장</span>
+                  <span className="font-bold text-gray-700 text-sm ml-1">본장</span>
                   <div className="flex items-center gap-1.5">
                     <button onClick={() => setHonba(Math.max(0, honba - 1))} className="bg-gray-100 w-8 h-8 rounded font-bold hover:bg-gray-200">-</button>
-                    <span className="font-bold text-lg w-4 text-center text-black-700">{honba}</span>
+                    <span className="font-bold text-lg w-5 text-center text-gray-800">{honba}</span>
                     <button onClick={() => setHonba(honba + 1)} className="bg-gray-100 w-8 h-8 rounded font-bold hover:bg-gray-200">+</button>
-                  </div>
-                </div>
-                <div className="flex-1 flex justify-between p-2.5 bg-white rounded-xl border border-gray-100 shadow-sm items-center">
-                  <span className="font-bold text-green-700 text-sm">공탁</span>
-                  <div className="flex items-center gap-1.5">
-                    <button onClick={() => setKyotaku(Math.max(0, kyotaku - 1))} className="bg-gray-100 w-8 h-8 rounded font-bold hover:bg-gray-200">-</button>
-                    <span className="font-bold text-lg w-4 text-center text-black-700">{kyotaku}</span>
-                    <button onClick={() => setKyotaku(kyotaku + 1)} className="bg-gray-100 w-8 h-8 rounded font-bold hover:bg-gray-200">+</button>
                   </div>
                 </div>
               </div>
@@ -1445,33 +1686,103 @@ function App() {
             {recordMode === '화료' ? (
               <>
                 <section className="space-y-3"><h3 className="font-bold text-base text-gray-800 border-b pb-1">화료 형태</h3><div className="flex gap-2"><button onClick={() => handleWinTypeChange('쯔모')} className={`flex-1 py-3 rounded-xl font-bold border-2 ${winType === '쯔모' ? 'border-[#2E7D32] bg-[#2E7D32] text-white' : 'bg-white text-gray-400 border-gray-100'}`}>쯔모</button><button onClick={() => handleWinTypeChange('론')} className={`flex-1 py-3 rounded-xl font-bold border-2 ${winType === '론' ? 'border-[#2E7D32] bg-[#2E7D32] text-white' : 'bg-white text-gray-400 border-gray-100'}`}>론</button></div><div className="flex gap-2"><button onClick={() => setMenzen('멘젠')} className={`flex-1 py-3 rounded-xl font-bold border-2 ${menzen === '멘젠' ? 'border-[#2E7D32] bg-[#2E7D32] text-white' : 'bg-white text-gray-400 border-gray-100'}`}>멘젠</button><button onClick={() => setMenzen('비멘젠')} className={`flex-1 py-3 rounded-xl font-bold border-2 ${menzen === '비멘젠' ? 'border-[#2E7D32] bg-[#2E7D32] text-white' : 'bg-white text-gray-400 border-gray-100'}`}>비멘젠</button></div></section>
-                <section className="space-y-2"><div className="flex justify-between items-end"><h3 className="font-bold text-base text-gray-800">화료자 / 방총자</h3><p className="text-[10px] text-gray-400 font-medium">클릭: 화료 / 더블클릭: 방총</p></div><div className="grid grid-cols-2 gap-2">{players.map((player, index) => (<button key={index} onTouchStart={() => handlePlayerTouchStart(index)} onTouchEnd={handlePlayerTouchEnd} onClick={() => handlePlayerClick(index)} className={`relative h-14 rounded-xl font-bold text-base transition-all border-2 select-none ${winner === index ? 'bg-[#2E7D32] border-[#2E7D32] text-white shadow-inner' : loser === index ? 'bg-orange-500 border-orange-500 text-white shadow-inner' : 'bg-white border-gray-200 text-gray-800'}`}>{winner === index && <span className="absolute top-1 left-2 text-[9px] bg-white text-[#2E7D32] px-1 rounded font-black">화료</span>}{loser === index && <span className="absolute top-1 left-2 text-[9px] bg-white text-orange-600 px-1 rounded font-black">방총</span>}{player}</button>))}</div></section>
-                <section className="space-y-2"><h3 className="font-bold text-base text-gray-800">대기 형태</h3><div className="grid grid-cols-3 gap-2">{['양면', '샤보', '간짱', '변짱', '단기', '특수대기'].map(t => <button key={t} onClick={() => setWaitType(t)} className={`p-2.5 rounded-xl text-center text-sm font-bold border-2 ${waitType === t ? 'border-[#2E7D32] bg-[#2E7D32] text-white' : 'bg-white border-gray-100 text-gray-600'}`}>{t}</button>)}</div></section>
-                <section className="space-y-4"><div className="flex justify-between items-end border-b pb-1"><div className="flex items-center gap-2"><h3 className="font-bold text-base text-gray-800">역 선택</h3><span className="text-[10px] text-orange-500 bg-orange-50 px-1.5 py-0.5 rounded border border-orange-200">더블클릭: 후로 감소</span></div><span className="text-xs font-bold text-[#2E7D32]">선택됨: {selectedYaku.length}개</span></div>
-                  {Object.entries(yakuData).map(([category, yakus]) => (<div key={category} className="space-y-1.5"><h4 className="font-bold text-[#2E7D32] text-xs">{category}</h4><div className="grid grid-cols-3 gap-1.5">{yakus.map(yaku => { if (currentGame?.type === '3인' && yaku === '삼색동순') return null; const isSelected = selectedYaku.includes(yaku); const isDecreased = furoDecreased.includes(yaku); const canDecrease = targetFuroYaku.includes(yaku); return (<button key={yaku} onClick={() => toggleYaku(yaku)} onTouchStart={() => canDecrease && handleYakuTouchStart(yaku)} onTouchEnd={() => canDecrease && handleYakuTouchEnd()} onDoubleClick={() => canDecrease && handleYakuDoubleClick(yaku)} className={`relative p-2 rounded-lg text-xs font-bold border transition-colors select-none ${isSelected ? 'bg-green-50 border-[#2E7D32] text-[#2E7D32] shadow-sm' : 'bg-white border-gray-200 text-gray-600'}`}>{isSelected && isDecreased && <span className="absolute -top-2 left-1 text-[8px] bg-orange-100 border border-orange-400 text-orange-600 px-1 rounded shadow-sm">후로 감소 (-1)</span>}{yaku}</button>);})}</div></div>))}
+                <section className="space-y-2">
+                  <div className="flex justify-between items-end">
+                    <h3 className="font-bold text-base text-gray-800">화료자 / 방총자</h3>
+                    <p className="text-[10px] text-gray-400 font-medium">클릭: 화료 / 길게(0.3초) 누르기: 방총</p>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    {players.map((player, index) => (
+                      <button 
+                        key={index} 
+                        onTouchStart={() => handlePlayerPressStart(index)} 
+                        onTouchEnd={handlePlayerPressEnd} 
+                        onMouseDown={() => handlePlayerPressStart(index)} 
+                        onMouseUp={handlePlayerPressEnd} 
+                        onMouseLeave={handlePlayerPressEnd} 
+                        onClick={() => handlePlayerClick(index)} 
+                        className={`relative h-14 rounded-xl font-bold text-base transition-all border-2 select-none ${winner === index ? 'bg-[#2E7D32] border-[#2E7D32] text-white shadow-inner' : loser === index ? 'bg-orange-500 border-orange-500 text-white shadow-inner' : 'bg-white border-gray-200 text-gray-800'}`}
+                      >
+                        {winner === index && <span className="absolute top-1 left-2 text-[9px] bg-white text-[#2E7D32] px-1 rounded font-black shadow-sm">화료</span>}
+                        {loser === index && <span className="absolute top-1 left-2 text-[9px] bg-white text-orange-600 px-1 rounded font-black shadow-sm">방총</span>}
+                        {player}
+                      </button>
+                    ))}
+                  </div>
                 </section>
-                <section className="space-y-3"><h3 className="font-bold text-base text-gray-800 border-b pb-1">도라 / 부수 / 판수 (자동계산)</h3>
-                  <div className="grid grid-cols-2 gap-3 bg-white p-3 rounded-xl border border-gray-100"><div className="flex justify-between items-center"><span className="font-bold text-amber-600 text-sm">도라</span><div className="flex items-center gap-2"><button onClick={() => setDora(Math.max(0, dora - 1))} className="w-6 h-6 bg-gray-100 rounded font-bold">-</button><span className="w-4 text-center font-bold">{dora}</span><button onClick={() => setDora(dora + 1)} className="w-6 h-6 bg-gray-100 rounded font-bold">+</button></div></div><div className="flex justify-between items-center"><span className="font-bold text-amber-600 text-sm">적도라</span><div className="flex items-center gap-2"><button onClick={() => setAka(Math.max(0, aka - 1))} className="w-6 h-6 bg-gray-100 rounded font-bold">-</button><span className="w-4 text-center font-bold">{aka}</span><button onClick={() => setAka(aka + 1)} className="w-6 h-6 bg-gray-100 rounded font-bold">+</button></div></div><div className="flex justify-between items-center"><span className="font-bold text-amber-600 text-sm">뒷도라</span><div className="flex items-center gap-2"><button onClick={() => setUra(Math.max(0, ura - 1))} className="w-6 h-6 bg-gray-100 rounded font-bold">-</button><span className="w-4 text-center font-bold">{ura}</span><button onClick={() => setUra(ura + 1)} className="w-6 h-6 bg-gray-100 rounded font-bold">+</button></div></div>
-                  {currentGame?.type === '3인' && (<div className="flex justify-between items-center"><span className="font-bold text-amber-600 text-sm">북도라</span><div className="flex items-center gap-2"><button onClick={() => setPei(Math.max(0, pei - 1))} className="w-6 h-6 bg-gray-50 text-gray-700 rounded font-bold hover:bg-gray-100">-</button><span className="w-4 text-center font-bold">{pei}</span><button onClick={() => setPei(pei + 1)} className="w-6 h-6 bg-gray-50 text-gray-700 rounded font-bold hover:bg-gray-100">+</button></div></div>)}</div><div className="flex gap-3">
-                    <div className="flex-1 flex justify-between p-3 bg-white rounded-xl border border-gray-100 items-center">
-                      <span className="font-bold text-[#2E7D32] text-sm">부수</span>
-                      <div className="flex items-center gap-2">
-                        <button onClick={() => setFu(prev => fuList[Math.max(0, fuList.indexOf(prev) - 1)])} className="bg-gray-100 w-8 h-8 rounded font-bold hover:bg-gray-200">-</button>
-                        <span className="font-bold text-lg w-6 text-center">{fu}</span>
-                        <button onClick={() => setFu(prev => fuList[Math.min(fuList.length - 1, fuList.indexOf(prev) + 1)])} className="bg-gray-100 w-8 h-8 rounded font-bold hover:bg-gray-200">+</button>
+                <section className="space-y-2"><h3 className="font-bold text-base text-gray-800">대기 형태</h3><div className="grid grid-cols-3 gap-2">{['양면', '샤보', '간짱', '변짱', '단기', '특수대기'].map(t => <button key={t} onClick={() => setWaitType(t)} className={`p-2.5 rounded-xl text-center text-sm font-bold border-2 ${waitType === t ? 'border-[#2E7D32] bg-[#2E7D32] text-white' : 'bg-white border-gray-100 text-gray-600'}`}>{t}</button>)}</div></section>
+                <section className="space-y-4">
+                  <div className="flex justify-between items-end border-b pb-1">
+                    <div className="flex items-center gap-2">
+                      <h3 className="font-bold text-base text-gray-800">역 선택</h3>
+                      {menzen === '비멘젠' && <span className="text-[10px] text-orange-500 bg-orange-50 px-1.5 py-0.5 rounded border border-orange-200">비멘젠: 후로 감소 자동 적용</span>}
+                    </div>
+                    <span className="text-xs font-bold text-[#2E7D32]">선택됨: {selectedYaku.length}개</span>
+                  </div>
+                  {Object.entries(yakuData).map(([category, yakus]) => (
+                    <div key={category} className="space-y-1.5">
+                      <h4 className="font-bold text-[#2E7D32] text-xs">{category}</h4>
+                      <div className="grid grid-cols-3 gap-1.5">
+                        {yakus.map(yaku => { 
+                          if (currentGame?.type === '3인' && yaku === '삼색동순') return null; 
+                          const isSelected = selectedYaku.includes(yaku); 
+                          const isDisabled = menzen === '비멘젠' && menzenOnlyYaku.includes(yaku);
+                          const isDecreased = menzen === '비멘젠' && targetFuroYaku.includes(yaku); 
+                          
+                          return (
+                            <button 
+                              key={yaku} 
+                              onClick={() => !isDisabled && toggleYaku(yaku)} 
+                              disabled={isDisabled}
+                              className={`relative p-2 rounded-lg text-xs font-bold border transition-colors select-none ${isDisabled ? 'bg-gray-100 border-gray-200 text-gray-400 opacity-50 cursor-not-allowed' : isSelected ? 'bg-green-50 border-[#2E7D32] text-[#2E7D32] shadow-sm' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'}`}
+                            >
+                              {isSelected && isDecreased && <span className="absolute -top-2 left-1 text-[8px] bg-orange-100 border border-orange-400 text-orange-600 px-1 rounded shadow-sm">후로 감소 (-1)</span>}
+                              {yaku}
+                            </button>
+                          );
+                        })}
                       </div>
                     </div>
-                    <div className="flex-1 flex justify-between p-3 bg-green-50 rounded-xl border border-green-200 items-center relative">
-                      <span className="absolute -top-2 left-2 bg-green-200 text-green-800 text-[9px] px-1 rounded font-bold shadow-sm">자동계산</span>
-                      <span className="font-bold text-[#2E7D32] text-sm">판수</span>
-                      <div className="flex items-center gap-2">
-                        <button onClick={() => setHan(Math.max(1, han - 1))} className="bg-white w-8 h-8 rounded font-bold shadow-sm hover:bg-gray-50">-</button>
-                        <span className="font-bold text-xl w-6 text-center text-[#2E7D32]">{han}</span>
-                        <button onClick={() => setHan(han + 1)} className="bg-white w-8 h-8 rounded font-bold shadow-sm hover:bg-gray-50">+</button>
-                      </div>
+                  ))}
+                </section>
+                
+                {/* 💡 요청 4 반영: 부수 2줄 버튼 패드로 교체 */}
+                <section className="space-y-3">
+                  <h3 className="font-bold text-base text-gray-800 border-b pb-1">도라 / 판수 / 부수</h3>
+                  <div className="grid grid-cols-2 gap-3 bg-white p-3 rounded-xl border border-gray-100 shadow-sm"><div className="flex justify-between items-center"><span className="font-bold text-amber-600 text-sm">도라</span><div className="flex items-center gap-2"><button onClick={() => setDora(Math.max(0, dora - 1))} className="w-6 h-6 bg-gray-100 rounded font-bold">-</button><span className="w-4 text-center font-bold">{dora}</span><button onClick={() => setDora(dora + 1)} className="w-6 h-6 bg-gray-100 rounded font-bold">+</button></div></div><div className="flex justify-between items-center"><span className="font-bold text-amber-600 text-sm">적도라</span><div className="flex items-center gap-2"><button onClick={() => setAka(Math.max(0, aka - 1))} className="w-6 h-6 bg-gray-100 rounded font-bold">-</button><span className="w-4 text-center font-bold">{aka}</span><button onClick={() => setAka(aka + 1)} className="w-6 h-6 bg-gray-100 rounded font-bold">+</button></div></div><div className="flex justify-between items-center"><span className="font-bold text-amber-600 text-sm">뒷도라</span><div className="flex items-center gap-2"><button onClick={() => setUra(Math.max(0, ura - 1))} className="w-6 h-6 bg-gray-100 rounded font-bold">-</button><span className="w-4 text-center font-bold">{ura}</span><button onClick={() => setUra(ura + 1)} className="w-6 h-6 bg-gray-100 rounded font-bold">+</button></div></div>
+                  {currentGame?.type === '3인' && (<div className="flex justify-between items-center"><span className="font-bold text-amber-600 text-sm">북도라</span><div className="flex items-center gap-2"><button onClick={() => setPei(Math.max(0, pei - 1))} className="w-6 h-6 bg-gray-50 text-gray-700 rounded font-bold hover:bg-gray-100">-</button><span className="w-4 text-center font-bold">{pei}</span><button onClick={() => setPei(pei + 1)} className="w-6 h-6 bg-gray-50 text-gray-700 rounded font-bold hover:bg-gray-100">+</button></div></div>)}</div>
+                  
+                  {/* 💡 판수를 부수 위로 끌어올림 */}
+                  <div className="flex-1 flex justify-between p-3 bg-green-50 rounded-xl border border-green-200 items-center relative shadow-sm">
+                    <span className="absolute -top-2 left-2 bg-green-200 text-green-800 text-[9px] px-1 rounded font-bold shadow-sm">역에 따라 자동계산</span>
+                    <span className="font-bold text-[#2E7D32] text-sm">판수</span>
+                    <div className="flex items-center gap-2">
+                      <button onClick={() => setHan(Math.max(1, han - 1))} className="bg-white w-8 h-8 rounded font-bold shadow-sm hover:bg-gray-50">-</button>
+                      <span className="font-black text-xl w-6 text-center text-[#2E7D32]">{han}</span>
+                      <button onClick={() => setHan(han + 1)} className="bg-white w-8 h-8 rounded font-bold shadow-sm hover:bg-gray-50">+</button>
                     </div>
                   </div>
-                  <input type="text" inputMode="numeric" placeholder="화료 점수 직접 입력 (선택사항, 예: 8000)" value={score} onChange={(e) => setScore(e.target.value.replace(/[^0-9]/g, ''))} className="w-full p-3 rounded-xl border border-gray-200 bg-white font-bold text-sm focus:outline-none focus:border-[#2E7D32]" />
+
+                  {/* 💡 5판 미만일 때만 부수 선택창 노출 */}
+                  {han < 5 && (
+                    <div className="bg-white p-3 rounded-xl border border-gray-100 shadow-sm flex flex-col gap-2">
+                      <div className="flex justify-between items-center"><span className="font-bold text-[#2E7D32] text-sm">부수 선택</span><span className="font-black text-lg text-[#2E7D32]">{fu}부</span></div>
+                      <div className="grid grid-cols-6 gap-1">
+                        {[20, 25, 30, 40, 50, 60].map(f => (
+                          <button key={f} onClick={() => setFu(f)} className={`py-1.5 rounded text-xs font-bold border transition-colors ${fu === f ? 'bg-[#2E7D32] text-white border-[#2E7D32] shadow-sm' : 'bg-gray-50 text-gray-600 border-gray-200 hover:bg-gray-100'}`}>{f}</button>
+                        ))}
+                      </div>
+                      <div className="grid grid-cols-6 gap-1">
+                        {[70, 80, 90, 100, 110, null].map((f, idx) => (
+                          f ? (
+                            <button key={f} onClick={() => setFu(f)} className={`py-1.5 rounded text-xs font-bold border transition-colors ${fu === f ? 'bg-[#2E7D32] text-white border-[#2E7D32] shadow-sm' : 'bg-gray-50 text-gray-600 border-gray-200 hover:bg-gray-100'}`}>{f}</button>
+                          ) : (
+                            <div key={`blank-${idx}`}></div>
+                          )
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </section>
               </>
             ) : recordMode === '유국' ? (
@@ -1485,7 +1796,7 @@ function App() {
                 <section className="space-y-3"><div className="flex justify-between items-end border-b pb-1"><h3 className="font-bold text-base text-red-600">촌보 플레이어 선택</h3></div><div className="grid grid-cols-2 gap-2">{players.map((player, index) => <button key={`chombo-${index}`} onClick={() => setChomboPlayer(index)} className={`h-14 rounded-xl font-bold text-base transition-all border-2 select-none ${chomboPlayer === index ? 'bg-red-500 border-red-500 text-white shadow-inner' : 'bg-white border-gray-200 text-gray-800'}`}>{player}</button>)}</div></section>
               </>
             )}
-            <section className="pt-4 border-t border-gray-200"><textarea placeholder="해당 국에 대한 메모나 코멘트를 자유롭게 적어주세요. (선택)" value={roundComment} onChange={(e) => setRoundComment(e.target.value)} className="w-full p-3 rounded-xl border border-gray-200 bg-white text-sm focus:outline-none focus:border-[#2E7D32] h-20 resize-none"></textarea></section>
+            <section className="pt-4 border-t border-gray-200"><textarea placeholder="해당 국에 대한 메모나 코멘트를 자유롭게 적어주세요. (선택)" value={roundComment} onChange={(e) => setRoundComment(e.target.value)} className="w-full p-3 rounded-xl border border-gray-200 bg-white text-sm focus:outline-none focus:border-[#2E7D32] h-20 resize-none shadow-sm"></textarea></section>
           </div>
           <div className="p-4 bg-white border-t border-gray-200 shadow-[0_-10px_15px_-3px_rgba(0,0,0,0.05)] z-10"><button onClick={handleSaveRound} className={`w-full text-white font-bold py-4 rounded-xl flex items-center justify-center gap-2 active:scale-[0.98] transition-all ${recordMode === '화료' ? 'bg-[#2E7D32] hover:bg-green-800' : recordMode === '유국' ? 'bg-gray-700 hover:bg-gray-800' : 'bg-red-600 hover:bg-red-700'}`}><Check size={20} strokeWidth={3} /> {recordMode === '화료' ? '화료 기록 저장' : recordMode === '유국' ? '유국 기록 저장' : '촌보 기록 저장'}</button></div>
         </div>
@@ -1498,7 +1809,7 @@ function App() {
             <div className="bg-[#1e293b] rounded-t-3xl p-4 flex justify-between items-center text-white"><h2 className="text-lg font-bold flex items-center gap-2"><Flag size={18} /> 대국 결과 입력</h2><button onClick={() => setIsEndGameModalOpen(false)} className="p-1 hover:bg-gray-700 rounded-full"><X size={20} /></button></div>
             <div className="p-4 flex-1 overflow-y-auto space-y-4">
               <div className="bg-yellow-50 border border-yellow-200 text-yellow-800 p-3 rounded-lg text-xs font-bold shadow-sm">⚠️ 소점 총합은 {players.length === 4 ? '100,000' : '105,000'}점이어야 합니다.<br/>현재 입력 합계: <span className="text-red-500">{finalScores.reduce((sum, f) => sum + (parseInt(f.score) || 0), 0).toLocaleString()}점</span></div>
-              <div className="space-y-2">{players.map((p, i) => (<div key={i} className="flex gap-3 items-center bg-white p-3 rounded-xl border border-gray-200 shadow-sm"><span className="w-14 font-bold truncate text-gray-800 text-sm">{p}</span><input type="number" inputMode="numeric" placeholder="소점" value={finalScores[i]?.score ?? ''} onChange={(e) => updateFinalScore(i, e.target.value)} className="flex-1 p-2 bg-gray-50 border border-gray-200 rounded-lg text-right font-bold text-sm focus:outline-none focus:border-[#2E7D32]" /></div>))}</div>
+              <div className="space-y-2">{players.map((p, i) => (<div key={i} className="flex gap-3 items-center bg-white p-3 rounded-xl border border-gray-200 shadow-sm"><span className="w-14 font-bold truncate text-gray-800 text-sm">{p}</span><input type="text" placeholder="소점 (예: -500)" value={finalScores[i]?.score ?? ''} onChange={(e) => updateFinalScore(i, e.target.value)} className="flex-1 p-2 bg-gray-50 border border-gray-200 rounded-lg text-right font-bold text-sm focus:outline-none focus:border-[#2E7D32]" /></div>))}</div>
               <p className="text-center text-gray-400 text-[10px] font-bold mt-2">※ PT(우마/오카)는 자동 계산됩니다.</p>
             </div>
             <div className="p-4 bg-white border-t border-gray-200 shadow-md"><button onClick={handleConfirmEndGame} className="w-full bg-[#1e293b] text-white font-bold text-sm py-3.5 rounded-xl hover:bg-gray-800 active:scale-[0.98] transition-all">결과 저장 및 대국 종료</button></div>
