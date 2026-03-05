@@ -540,8 +540,11 @@ function App() {
   return (
     <div className="flex flex-col h-screen bg-[#F5F5DC] font-sans relative overflow-hidden text-[#1A1A1A]">
       
+      {/* 💡 전체 영역이 스크롤되도록 main 태그로 헤더부터 감쌉니다 */}
+      <main className="flex-1 overflow-y-auto flex flex-col relative pb-24">
+        
       {/* 🚀 상단 헤더 */}
-      <header className="bg-[#2E7D32] text-white p-4 pt-10 shadow-md z-20">
+      <header className="bg-[#2E7D32] text-white p-4 pt-10 shadow-md z-20 shrink-0">
         <div className="flex items-center justify-between mb-3 min-h-[36px]">
           {activeNav === '기록' && selectedGameId !== null ? (
             <div className="flex items-center w-full">
@@ -583,7 +586,7 @@ function App() {
 
       {/* 상단 탭 (기록 화면 메인에서만 노출) */}
       {activeNav === '기록' && selectedGameId === null && (
-        <div className="flex bg-white border-b border-gray-200 shadow-sm z-10 sticky top-0">
+        <div className="flex bg-white border-b border-gray-200 shadow-sm z-10 shrink-0">
           {['전체', '4인', '3인'].map(t => (
             <button key={t} onClick={() => setActiveTab(t)} className={`flex-1 py-3 text-center font-bold flex justify-center items-center gap-1.5 border-b-2 ${activeTab === t ? 'border-[#2E7D32] text-[#2E7D32]' : 'border-transparent text-gray-500'}`}>
               {t} 게임 <span className={`text-[10px] px-2 py-0.5 rounded-full text-white ${activeTab === t ? 'bg-[#2E7D32]' : 'bg-gray-300'}`}>{t === '전체' ? games.length : games.filter(g=>g.type===t).length}</span>
@@ -594,7 +597,7 @@ function App() {
 
       {/* 🔍 검색창 (기록 메인) */}
       {activeNav === '기록' && selectedGameId === null && (
-        <div className="p-4 pb-0 bg-[#F5F5DC]">
+        <div className="p-4 pb-0 bg-[#F5F5DC] shrink-0">
           <div className="relative">
             <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><Search size={16} className="text-gray-400" /></div>
             <input type="text" placeholder="플레이어 이름 또는 날짜 검색..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full pl-10 pr-4 py-2.5 bg-white border border-gray-200 rounded-xl text-sm font-medium focus:outline-none focus:border-[#2E7D32] shadow-sm" />
@@ -602,7 +605,7 @@ function App() {
         </div>
       )}
 
-      <main className="flex-1 overflow-y-auto flex flex-col relative pb-24">
+      {/* <main className="flex-1 overflow-y-auto flex flex-col relative pb-24"> */}
         
         {/* ========================================= */}
         {/* 화면 1: 대국 기록 메인 리스트 */}
@@ -677,7 +680,7 @@ function App() {
         {/* ========================================= */}
         {activeNav === '기록' && selectedGameId !== null && currentGame && (
           <div className="flex-1 flex flex-col">
-            <div className="bg-white border-b border-gray-200 grid grid-cols-4 divide-x divide-gray-100 text-center py-2.5 shadow-sm z-10 sticky top-0">
+            <div className="bg-white border-b border-gray-200 grid grid-cols-4 divide-x divide-gray-100 text-center py-2.5 shadow-sm z-10 shrink-0">
               <div className="flex flex-col"><span className="text-lg font-black text-[#2E7D32]">{totalRecords}</span><span className="text-[9px] text-gray-500 font-bold">총 기록</span></div>
               <div className="flex flex-col"><span className="text-lg font-black text-[#2E7D32]">{tsumoCount}</span><span className="text-[9px] text-gray-500 font-bold">쯔모</span></div>
               <div className="flex flex-col"><span className="text-lg font-black text-orange-500">{ronCount}</span><span className="text-[9px] text-gray-500 font-bold">론</span></div>
@@ -763,7 +766,7 @@ function App() {
         {/* ========================================= */}
         {activeNav === '통계' && (
           <div className="flex-1 flex flex-col bg-[#F5F5DC]">
-            <div className="bg-white border-b border-gray-200 sticky top-0 z-10 shadow-sm">
+            <div className="bg-white border-b border-gray-200 z-10 shadow-sm shrink-0">
               <div className="flex text-sm">
                 {['전체', '4인', '3인'].map(t => (
                   <button key={t} onClick={() => setStatsMainTab(t)} className={`flex-1 py-3 font-bold ${statsMainTab === t ? 'bg-[#2E7D32] text-white' : 'text-gray-500 bg-gray-50 border-b-2 border-gray-200 hover:bg-gray-100'}`}>{t} 게임</button>
@@ -905,7 +908,7 @@ function App() {
         {/* ========================================= */}
         {activeNav === '랭킹' && (
           <div className="flex-1 flex flex-col bg-[#F5F5DC]">
-            <div className="flex bg-white border-b border-gray-200 shadow-sm z-10 sticky top-0 text-sm">
+            <div className="flex bg-white border-b border-gray-200 shadow-sm z-10 shrink-0 text-sm">
               {['전체', '4인', '3인'].map(t => (
                 <button key={t} onClick={() => setRankingMainTab(t)} className={`flex-1 py-3 font-bold ${rankingMainTab === t ? 'bg-[#2E7D32] text-white' : 'text-gray-500 bg-gray-50 border-b-2 border-gray-200 hover:bg-gray-100'}`}>{t} 순위</button>
               ))}
