@@ -1305,7 +1305,7 @@ function App() {
               <div className="flex flex-wrap gap-3">
                 {/* 국풍 박스 ( < > 버튼으로 순환 ) */}
                 <div className="flex-1 flex justify-between items-center p-2.5 bg-white rounded-xl border border-gray-100 shadow-sm min-w-[120px]">
-                  <span className="font-bold text-gray-700 text-sm">국풍</span>
+                  <span className="font-bold text-green-700 text-sm">국풍</span>
                   <div className="flex items-center gap-1.5">
                     <button onClick={() => {
                       const winds = ['동', '남', '서', '북'];
