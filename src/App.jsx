@@ -669,21 +669,43 @@ function App() {
 
   const filteredPlayerStatsList = playerStatsList.filter(p => p.name.includes(statsSearchQuery));
 
+  // 💡 세부 분포 모달 데이터 생성 (동점 순위 및 가나다 정렬 적용)
   const openBreakdown = (title, type, key) => {
-    const data = playerStatsList.map(p => {
+    const rawData = playerStatsList.map(p => {
       let count = 0;
       if (type === 'yaku') count = p.yakus[key] || 0;
       else if (type === 'wait') count = p.waitTypes[key] || 0;
       else if (type === 'winType') count = p[key] || 0;
       return { name: p.name, count };
-    }).filter(p => p.count > 0).sort((a, b) => b.count - a.count);
-    setBreakdownData({ title, data });
+    }).filter(p => p.count > 0).sort((a, b) => {
+      if (b.count !== a.count) return b.count - a.count;
+      return a.name.localeCompare(b.name); // 동점 시 이름 가나다순
+    });
+
+    let currentRank = 1;
+    const rankedData = rawData.map((item, index, arr) => {
+      if (index > 0 && item.count < arr[index - 1].count) currentRank = index + 1;
+      return { ...item, rank: currentRank };
+    });
+
+    setBreakdownData({ title, data: rankedData });
   };
 
+  // 💡 전체 역 통계 데이터 생성 (동점 순위 및 가나다 정렬 적용)
   const globalYakuStats = useMemo(() => {
     const yCounts = {};
     statsGames.forEach(g => g.rounds.forEach(r => { if(r.type === '화료') r.selectedYaku?.forEach(y => yCounts[y] = (yCounts[y] || 0) + 1); }));
-    return Object.entries(yCounts).sort((a,b) => b[1] - a[1]);
+    
+    const sorted = Object.entries(yCounts).map(([yaku, count]) => ({ yaku, count })).sort((a, b) => {
+      if (b.count !== a.count) return b.count - a.count;
+      return a.yaku.localeCompare(b.yaku); // 동점 시 역 이름 가나다순
+    });
+
+    let currentRank = 1;
+    return sorted.map((item, index, arr) => {
+      if (index > 0 && item.count < arr[index - 1].count) currentRank = index + 1;
+      return { ...item, rank: currentRank };
+    });
   }, [statsGames]);
 
   const globalWinStats = useMemo(() => {
@@ -749,7 +771,7 @@ function App() {
     <div className="flex flex-col h-screen bg-[#F5F5DC] font-sans relative overflow-hidden text-[#1A1A1A]">
       
       <main className="flex-1 overflow-y-auto flex flex-col relative pb-24">
-        
+          
       <header className="bg-[#2E7D32] text-white p-4 pt-10 shadow-md z-20 shrink-0">
         <div className="flex items-center justify-between mb-3 min-h-[36px]">
           {activeNav === '기록' && selectedGameId !== null ? (
@@ -1185,15 +1207,16 @@ function App() {
                   <h3 className="font-bold text-lg text-gray-800 mb-4 border-b pb-2">역별 출현 횟수 (전체)</h3>
                   {globalYakuStats.length === 0 ? <p className="text-gray-400 text-sm text-center py-10">데이터가 없습니다.</p> : (
                     <div className="space-y-3">
-                      {globalYakuStats.map(([yaku, count], i) => {
-                        const maxCount = globalYakuStats[0][1];
-                        const percent = (count / maxCount) * 100;
+                      {globalYakuStats.map((item) => {
+                        const maxCount = globalYakuStats[0].count;
+                        const percent = (item.count / maxCount) * 100;
+                        const rankColor = item.rank === 1 ? 'bg-yellow-400' : item.rank === 2 ? 'bg-gray-400' : item.rank === 3 ? 'bg-amber-600' : 'bg-gray-200 text-gray-500';
                         return (
-                          <div key={yaku} onClick={() => openBreakdown(`${yaku} 출현 분포`, 'yaku', yaku)} className="flex items-center gap-3 cursor-pointer hover:bg-gray-50 p-1.5 -mx-1.5 rounded transition-colors active:scale-[0.98]">
-                            <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-black text-white ${i === 0 ? 'bg-yellow-400' : i === 1 ? 'bg-gray-400' : i === 2 ? 'bg-amber-600' : 'bg-gray-200 text-gray-500'}`}>{i + 1}</div>
-                            <span className="w-24 text-sm font-bold text-gray-700 truncate">{yaku}</span>
+                          <div key={item.yaku} onClick={() => openBreakdown(`${item.yaku} 출현 분포`, 'yaku', item.yaku)} className="flex items-center gap-3 cursor-pointer hover:bg-gray-50 p-1.5 -mx-1.5 rounded transition-colors active:scale-[0.98]">
+                            <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-black text-white ${rankColor}`}>{item.rank}</div>
+                            <span className="w-24 text-sm font-bold text-gray-700 truncate">{item.yaku}</span>
                             <div className="flex-1 h-3 bg-gray-100 rounded-full overflow-hidden relative"><div className="h-full bg-green-500 rounded-full" style={{ width: `${percent}%` }}></div></div>
-                            <span className="w-8 text-right text-sm font-black text-[#2E7D32]">{count}회</span>
+                            <span className="w-8 text-right text-sm font-black text-[#2E7D32]">{item.count}회</span>
                           </div>
                         );
                       })}
@@ -1274,24 +1297,24 @@ function App() {
         {/* 화면 3: 🏆 랭킹 페이지 (확장 테이블) */}
         {/* ========================================= */}
         {activeNav === '랭킹' && (
-          <div className="flex-1 flex flex-col bg-[#F5F5DC] overflow-hidden">
+          <div className="flex flex-col bg-[#F5F5DC]">
             <div className="flex bg-white border-b border-gray-200 shadow-sm z-10 shrink-0 text-sm">
               {['4인', '3인'].map(t => (
                 <button key={t} onClick={() => setRankingMainTab(t)} className={`flex-1 py-3 font-bold ${rankingMainTab === t ? 'bg-[#2E7D32] text-white' : 'text-gray-500 bg-gray-50 border-b-2 border-gray-200 hover:bg-gray-100'}`}>{t} 순위</button>
               ))}
             </div>
             
-            <div className="p-4 space-y-4 flex-1 flex flex-col h-full">
+            <div className="p-4 space-y-4">
               <div className="bg-white p-3 rounded-xl shadow-sm border border-gray-200 flex items-center justify-between shrink-0">
                 <span className="text-xs font-bold text-gray-500 flex items-center gap-1"><BarChart2 size={14}/> 테이블 헤더를 터치하여 정렬하세요</span>
               </div>
 
               {rankingList.length === 0 ? (
-                <div className="text-center py-20 text-gray-400 font-bold bg-white rounded-2xl shadow-sm border border-gray-100 shrink-0"><Trophy size={48} className="mx-auto mb-4 text-gray-300" /><p>아직 종료된 대국이 없어</p><p>순위를 매길 수 없습니다.</p></div>
+                <div className="text-center py-20 text-gray-400 font-bold bg-white rounded-2xl shadow-sm border border-gray-100"><Trophy size={48} className="mx-auto mb-4 text-gray-300" /><p>아직 종료된 대국이 없어</p><p>순위를 매길 수 없습니다.</p></div>
               ) : (
-                <div className="flex-1 overflow-auto bg-white rounded-xl shadow-sm border border-gray-200 relative">
+                <div className="overflow-x-auto bg-white rounded-xl shadow-sm border border-gray-200 relative pb-2">
                   <table className="w-full min-w-max text-xs sm:text-sm text-center whitespace-nowrap table-auto border-collapse">
-                    <thead className="bg-gray-100 sticky top-0 z-20 font-bold text-gray-700 shadow-sm">
+                    <thead className="bg-gray-100 font-bold text-gray-700 border-b border-gray-200">
                       <tr>
                         <th className="sticky left-0 bg-gray-100 z-30 p-3 border-b border-r border-gray-300 cursor-pointer hover:bg-gray-200" onClick={() => requestRankingSort('name')}><div className="flex items-center justify-center gap-1">작사 이름 <ArrowUpDown size={10}/></div></th>
                         <th className="p-3 border-b border-gray-300 cursor-pointer hover:bg-gray-200" onClick={() => requestRankingSort('gamesPlayed')}><div className="flex items-center justify-center gap-1">대국수 <ArrowUpDown size={10}/></div></th>
@@ -1423,12 +1446,13 @@ function App() {
               {breakdownData.data.length === 0 ? (
                 <p className="text-center text-gray-400 py-4 font-bold text-sm">기록된 데이터가 없습니다.</p>
               ) : (
-                breakdownData.data.map((item, idx) => {
+                breakdownData.data.map((item) => {
                   const maxCount = breakdownData.data[0].count;
                   const pct = (item.count / maxCount) * 100;
+                  const rankColor = item.rank === 1 ? 'bg-yellow-400' : item.rank === 2 ? 'bg-gray-400' : item.rank === 3 ? 'bg-amber-600' : 'bg-gray-200 text-gray-500';
                   return (
                     <div key={item.name} className="flex items-center gap-3">
-                      <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-black text-white ${idx === 0 ? 'bg-yellow-400' : idx === 1 ? 'bg-gray-400' : idx === 2 ? 'bg-amber-600' : 'bg-gray-200 text-gray-500'}`}>{idx + 1}</div>
+                      <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-black text-white ${rankColor}`}>{item.rank}</div>
                       <span className="w-20 text-sm font-bold text-gray-700 truncate">{item.name}</span>
                       <div className="flex-1 h-2 bg-gray-100 rounded-full overflow-hidden">
                         <div className="h-full bg-[#2E7D32]" style={{ width: `${pct}%` }}></div>
