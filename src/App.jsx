@@ -1416,7 +1416,13 @@ function App() {
           const uniquePlayers = Array.from(new Set(games.flatMap(g => g.players))).sort();
           
           // 두 플레이어가 함께한 종료된 대국 필터링
-          const rivalGames = games.filter(g => g.status === '종료' && g.players.includes(rival1) && g.players.includes(rival2) && rival1 !== rival2);
+          const rivalGames = games.filter(g => 
+            g.status === '종료' && 
+            g.players.includes(rival1) && 
+            g.players.includes(rival2) && 
+            rival1 !== rival2 &&
+            (selectedSeason === 'all' || g.seasonId === selectedSeason) // 👈 바로 이 줄이 추가되었습니다!
+          );
           
           let p1Wins = 0, p2Wins = 0;
           let p1RonP2 = 0, p2RonP1 = 0;
