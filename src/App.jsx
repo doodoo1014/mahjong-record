@@ -1158,9 +1158,9 @@ function App() {
           </div>
         )}
 
-        {/* === 랭킹 화면 === */}
+       {/* === 랭킹 화면 === */}
         {activeNav === '랭킹' && (
-          <div className="flex flex-col bg-[#F5F5DC] h-full">
+          <div className="flex-1 flex flex-col bg-[#F5F5DC]">
             <div className="flex bg-white border-b border-gray-200 shadow-sm z-10 shrink-0 text-sm">
               {['4인', '3인'].map(t => (
                 <button key={t} onClick={() => setRankingMainTab(t)} className={`flex-1 py-3 font-bold ${rankingMainTab === t ? 'bg-[#2E7D32] text-white' : 'text-gray-500 bg-gray-50 border-b-2 border-gray-200 hover:bg-gray-100'}`}>{t} 순위</button>
@@ -1175,7 +1175,7 @@ function App() {
               {rankingList.length === 0 ? (
                 <div className="text-center py-20 text-gray-400 font-bold bg-white rounded-2xl shadow-sm border border-gray-100"><Trophy size={48} className="mx-auto mb-4 text-gray-300" /><p>아직 종료된 대국이 없어</p><p>순위를 매길 수 없습니다.</p></div>
               ) : (
-                <div className="overflow-x-auto bg-white rounded-xl shadow-sm border border-gray-200 relative pb-2 flex-1">
+                <div className="overflow-x-auto bg-white rounded-xl shadow-sm border border-gray-200 relative pb-2 mb-24">
                   <table className="w-full min-w-max text-xs sm:text-sm text-center whitespace-nowrap table-auto border-collapse">
                     <thead className="bg-gray-100 font-bold text-gray-700 border-b border-gray-200">
                       <tr>
@@ -1388,7 +1388,7 @@ function App() {
                 <li>데이테베이스 구조를 개편하였습니다.</li>
                 <li>대국자 선택 기능을 개선하였습니다.</li>
                 <li>대국 추가 시 반장전과 동풍전을 선택할 수 있도록 하였습니다.</li>
-                <li>다가화 입력을 개선하였습니다.</li>
+                <li>다가화 기능을 추가하였습니다.</li>
               </ul>
             </div>
             <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-200 animate-in fade-in slide-in-from-bottom-2">
