@@ -304,7 +304,7 @@ function App() {
   const [editingRoundId, setEditingRoundId] = useState(null);
 
   const currentGame = games.find(g => g.id === selectedGameId);
-  const currentParticipants = currentGame?.game_results || [];
+  const currentParticipants = [...(currentGame?.game_results || [])].sort((a, b) => ({'동': 1, '남': 2, '서': 3, '북': 4}[a.wind] || 5) - ({'동': 1, '남': 2, '서': 3, '북': 4}[b.wind] || 5));
   const rounds = currentGame?.rounds || [];
 
   const playerTimerRef = useRef(null); const isPlayerLongPressRef = useRef(false);
@@ -783,7 +783,8 @@ function App() {
                      </div>
                      <div className="flex justify-between items-center mb-3"><h3 className="font-bold text-base text-gray-800 truncate pr-4">{game.game_results.map(r => r.players?.original_name || r.players?.display_name).join(' · ')}</h3>{canWrite && <button onClick={e => handleDeleteGame(e, game.id)} className="text-red-300 hover:text-red-500 p-1"><Trash2 size={16} /></button>}</div>
                      <div className="grid gap-2 mt-2 grid-cols-2">
-                       {game.game_results.map(res => {
+                       {/* 💡 수정: 대국 리스트의 카드에서도 동-남-서-북 순서로 강제 정렬 후 렌더링 */}
+                       {[...game.game_results].sort((a, b) => ({'동': 1, '남': 2, '서': 3, '북': 4}[a.wind] || 5) - ({'동': 1, '남': 2, '서': 3, '북': 4}[b.wind] || 5)).map(res => {
                          const pId = res.player_id; const isTobi = game.status === '종료' && res.score < 0; const hasYPlayer = playerYakuman(pId); const hasCPlayer = playerChombo(pId);
                          let boxBg = 'bg-white'; let boxBorder = 'border border-gray-100'; let windBg = 'bg-[#2E7D32]'; let nameColor = 'text-gray-800';
                          if (hasYPlayer && hasCPlayer) { boxBg = 'bg-white'; boxBorder = 'border-2 border-gray-600'; windBg = 'bg-red-600'; nameColor = 'text-gray-800'; } else if (hasCPlayer) { boxBg = 'bg-white'; boxBorder = 'border-2 border-gray-600'; windBg = 'bg-gray-600'; nameColor = 'text-gray-800'; } else if (hasYPlayer) { boxBg = 'bg-white'; boxBorder = 'border-2 border-red-500'; windBg = 'bg-red-600'; nameColor = 'text-gray-800'; }
@@ -842,7 +843,10 @@ function App() {
                   <div className="space-y-1.5">
                     {currentParticipants.map(res => (
                       <div key={res.player_id} className="flex justify-between items-center py-1.5 border-b border-gray-700 last:border-0 text-sm">
-                        <span className="font-bold">{res.players?.original_name || res.players?.display_name}</span>
+                        <div className="flex items-center gap-2">
+                          <div className="w-5 h-5 rounded flex items-center justify-center text-[10px] font-bold bg-gray-600 text-white">{res.wind}</div>
+                          <span className="font-bold">{res.players?.original_name || res.players?.display_name}</span>
+                        </div>
                         <div className="flex items-center gap-3">
                           <span className="w-16 font-medium text-gray-300 text-xs text-right">{Number(res.score).toLocaleString()}</span>
                           <span className={`w-12 font-black text-right ${res.pt > 0 ? 'text-green-400' : res.pt < 0 ? 'text-red-400' : 'text-gray-400'}`}>{res.pt > 0 ? '+' : ''}{res.pt}</span>
